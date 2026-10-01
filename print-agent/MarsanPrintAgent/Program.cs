@@ -270,6 +270,7 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "Marsan Print Agent";
+        try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
         Width = 1080;
         Height = 610;
         MinimumSize = new Size(920, 560);
@@ -312,7 +313,7 @@ public sealed class MainForm : Form
             Close();
         });
         tray.Text = "Marsan Print Agent";
-        tray.Icon = SystemIcons.Application;
+        try { tray.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { tray.Icon = SystemIcons.Application; }
         tray.Visible = true;
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, __) =>
@@ -476,7 +477,7 @@ public sealed class MainForm : Form
         content.Controls.Add(BuildSettingsCard());
 
 
-        footerLabel.Text = "Marsan Print Agent  •  v1.2 Lite";
+        footerLabel.Text = "Marsan Print Agent  •  v1.3 Remoto";
         footerLabel.ForeColor = Muted;
         footerLabel.Font = new Font("Segoe UI", 8.5f);
         footerLabel.AutoSize = true;
