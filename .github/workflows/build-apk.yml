@@ -14,7 +14,11 @@ jobs:
           java-version: '17'
       - name: Prepare Android SDK
         run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER=$(find "$ANDROID_HOME" -type f -name sdkmanager 2>/dev/null | head -n 1)
+          if [ -z "$SDKMANAGER" ]; then SDKMANAGER=$(command -v sdkmanager || true); fi
+          if [ -z "$SDKMANAGER" ]; then echo "sdkmanager não encontrado"; find "$ANDROID_HOME" -maxdepth 4 -type f | head -100; exit 1; fi
+          echo "Usando $SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
           "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
