@@ -124,6 +124,7 @@ public sealed class AgentApiClient
 public sealed class AgentService : IDisposable
 {
     readonly AgentApiClient api=new(); CancellationTokenSource? cts; Task? loop; readonly HashSet<string> processing=new(StringComparer.OrdinalIgnoreCase);
+    string? lastJobError;
     public event Action<string>? StatusChanged; public bool IsRunning=>loop is {IsCompleted:false};
     public void Start(Func<AgentConfig> get){if(IsRunning)return;cts=new();loop=Task.Run(()=>Loop(get,cts.Token));StatusChanged?.Invoke("Iniciado");}
     public void Stop(){cts?.Cancel();StatusChanged?.Invoke("Parado");}
@@ -144,7 +145,13 @@ public sealed class AgentService : IDisposable
                 else
                 {
                     StatusChanged?.Invoke("Conectando...");
-                    var jobs=await api.GetPendingAsync(c,ct);StatusChanged?.Invoke($"Conectado • {jobs.Count} pendente(s)");
+                    var jobs=await api.GetPendingAsync(c,ct);
+                    if(jobs.Count>0) {
+                        lastJobError=null;
+                        StatusChanged?.Invoke($"Conectado • {jobs.Count} pendente(s)");
+                    } else if(string.IsNullOrWhiteSpace(lastJobError)) {
+                        StatusChanged?.Invoke("Conectado • 0 pendente(s)");
+                    }
                     foreach(var j in jobs)
                     {
                         if(ct.IsCancellationRequested||string.IsNullOrWhiteSpace(j.Id)||!processing.Add(j.Id))continue;
@@ -177,7 +184,15 @@ public sealed class AgentService : IDisposable
             }
 
             await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
-        }catch(Exception ex){try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}}
+            lastJobError=null;
+            StatusChanged?.Invoke($"PDF salvo • {Path.GetFileName(p)}");
+        }
+        catch(Exception ex)
+        {
+            lastJobError=ex.Message;
+            StatusChanged?.Invoke("ERRO • " + ex.Message);
+            try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}
+        }
     }
     static string? FindEdge()
     {
@@ -197,26 +212,43 @@ public sealed class AgentService : IDisposable
             throw new InvalidOperationException("Microsoft Edge não encontrado para gerar o PDF.");
 
         var tempHtml=Path.Combine(Path.GetTempPath(),$"marsan-print-{Guid.NewGuid():N}.html");
+        var tempProfile=Path.Combine(Path.GetTempPath(),$"marsan-edge-{Guid.NewGuid():N}");
         try
         {
             await File.WriteAllBytesAsync(tempHtml,htmlBytes,ct);
+            Directory.CreateDirectory(tempProfile);
             var uri=new Uri(tempHtml).AbsoluteUri;
+            var args =
+                $"--headless=new --disable-gpu --no-first-run --no-default-browser-check " +
+                $"--user-data-dir=\"{tempProfile}\" " +
+                $"--print-to-pdf-no-header --print-to-pdf=\"{outputPdf}\" \"{uri}\"";
             var psi=new ProcessStartInfo
             {
                 FileName=edge,
                 UseShellExecute=false,
                 CreateNoWindow=true,
                 WindowStyle=ProcessWindowStyle.Hidden,
-                Arguments=$"--headless --disable-gpu --no-first-run --print-to-pdf=\"{outputPdf}\" \"{uri}\""
+                Arguments=args
             };
             using var process=System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
             await process.WaitForExitAsync(ct);
-            if(process.ExitCode!=0 || !File.Exists(outputPdf))
-                throw new InvalidOperationException("Não foi possível converter o documento para PDF.");
+            if(process.ExitCode!=0)
+                throw new InvalidOperationException($"Edge encerrou com código {process.ExitCode}.");
+
+            for(int i=0;i<20 && !File.Exists(outputPdf);i++)
+                await Task.Delay(250,ct);
+
+            if(!File.Exists(outputPdf))
+                throw new InvalidOperationException("O Edge não gerou o arquivo PDF.");
+
+            var info=new FileInfo(outputPdf);
+            if(info.Length<500)
+                throw new InvalidOperationException("O PDF gerado ficou vazio ou inválido.");
         }
         finally
         {
             try{if(File.Exists(tempHtml))File.Delete(tempHtml);}catch{}
+            try{if(Directory.Exists(tempProfile))Directory.Delete(tempProfile,true);}catch{}
         }
     }
 
@@ -477,7 +509,7 @@ public sealed class MainForm : Form
         content.Controls.Add(BuildSettingsCard());
 
 
-        footerLabel.Text = "Marsan Print Agent  •  v1.3 Remoto";
+        footerLabel.Text = "Marsan Print Agent  •  v1.4 Diagnóstico";
         footerLabel.ForeColor = Muted;
         footerLabel.Font = new Font("Segoe UI", 8.5f);
         footerLabel.AutoSize = true;
@@ -752,9 +784,11 @@ public sealed class MainForm : Form
     void UpdateStatus(string value)
     {
         statusLabel.Text = value;
-        var ok = value.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase);
+        var ok = value.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase) || value.StartsWith("PDF salvo", StringComparison.OrdinalIgnoreCase);
+        var error = value.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase);
         var waiting = value.Contains("Aguardando", StringComparison.OrdinalIgnoreCase) || value.Contains("Conectando", StringComparison.OrdinalIgnoreCase);
-        statusDot.ForeColor = ok ? Color.FromArgb(52, 168, 98) : waiting ? Gold : Color.FromArgb(173, 179, 175);
+        statusLabel.ForeColor = error ? Color.FromArgb(164, 55, 45) : Ink;
+        statusDot.ForeColor = error ? Color.FromArgb(190, 65, 52) : ok ? Color.FromArgb(52, 168, 98) : waiting ? Gold : Color.FromArgb(173, 179, 175);
     }
 
     void LoadUi()
