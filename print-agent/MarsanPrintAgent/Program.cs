@@ -41,6 +41,11 @@ public sealed class PrintJob
     [JsonPropertyName("copies")] public int Copies { get; set; } = 1;
 }
 public sealed class JobsResponse { [JsonPropertyName("jobs")] public List<PrintJob> Jobs { get; set; } = new(); }
+public sealed class DownloadedDocument
+{
+    public byte[] Bytes { get; init; } = Array.Empty<byte>();
+    public string ContentType { get; init; } = "application/octet-stream";
+}
 
 public static class ConfigStore
 {
@@ -86,15 +91,20 @@ public sealed class AgentApiClient
         var json=await res.Content.ReadAsStringAsync(ct);
         return JsonSerializer.Deserialize<JobsResponse>(json,new JsonSerializerOptions{PropertyNameCaseInsensitive=true})?.Jobs ?? new();
     }
-    public async Task<byte[]> DownloadAsync(PrintJob j, AgentConfig c, CancellationToken ct)
+    public async Task<DownloadedDocument> DownloadAsync(PrintJob j, AgentConfig c, CancellationToken ct)
     {
-        if(!string.IsNullOrWhiteSpace(j.DocumentBase64)) return Convert.FromBase64String(j.DocumentBase64);
+        if(!string.IsNullOrWhiteSpace(j.DocumentBase64))
+            return new DownloadedDocument { Bytes = Convert.FromBase64String(j.DocumentBase64), ContentType = "application/pdf" };
         if(string.IsNullOrWhiteSpace(j.DocumentUrl)) throw new InvalidOperationException("Trabalho sem documento.");
         var u=j.DocumentUrl.StartsWith("http",StringComparison.OrdinalIgnoreCase)?j.DocumentUrl:c.ApiBaseUrl.TrimEnd('/')+"/"+j.DocumentUrl.TrimStart('/');
         using var req=new HttpRequestMessage(HttpMethod.Get,u); Auth(req,c);
         using var res=await http.SendAsync(req,ct);
-        if(!res.IsSuccessStatusCode) throw new InvalidOperationException($"Falha ao baixar PDF (HTTP {(int)res.StatusCode})");
-        return await res.Content.ReadAsByteArrayAsync(ct);
+        if(!res.IsSuccessStatusCode) throw new InvalidOperationException($"Falha ao baixar documento (HTTP {(int)res.StatusCode})");
+        return new DownloadedDocument
+        {
+            Bytes = await res.Content.ReadAsByteArrayAsync(ct),
+            ContentType = res.Content.Headers.ContentType?.MediaType ?? "application/octet-stream"
+        };
     }
     public async Task CompleteAsync(string id,string status,string? message,AgentConfig c,CancellationToken ct)
     {
@@ -149,14 +159,67 @@ public sealed class AgentService : IDisposable
     {
         try
         {
-            var bytes=await api.DownloadAsync(j,c,ct);
-            if(bytes.Length<4||bytes[0]!=0x25||bytes[1]!=0x50||bytes[2]!=0x44||bytes[3]!=0x46)throw new InvalidOperationException("Arquivo recebido não é PDF.");
+            var doc=await api.DownloadAsync(j,c,ct);
             Directory.CreateDirectory(c.OutputFolder);
             string Safe(string? s)=>string.IsNullOrWhiteSpace(s)?"Documento":new string(s.Where(x=>!Path.GetInvalidFileNameChars().Contains(x)).ToArray()).Trim().Replace(' ','_');
             var p=Path.Combine(c.OutputFolder,$"{DateTime.Now:yyyy-MM-dd_HHmmss}_{Safe(j.CustomerName)}_{Safe(j.Title)}.pdf");
-            await File.WriteAllBytesAsync(p,bytes,ct);await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
+
+            if(doc.ContentType.Contains("html",StringComparison.OrdinalIgnoreCase))
+            {
+                await ConvertHtmlToPdfAsync(doc.Bytes,p,ct);
+            }
+            else
+            {
+                var bytes=doc.Bytes;
+                if(bytes.Length<4||bytes[0]!=0x25||bytes[1]!=0x50||bytes[2]!=0x44||bytes[3]!=0x46)
+                    throw new InvalidOperationException("Documento recebido não é um PDF válido.");
+                await File.WriteAllBytesAsync(p,bytes,ct);
+            }
+
+            await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
         }catch(Exception ex){try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}}
     }
+    static string? FindEdge()
+    {
+        var paths = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Edge\Application\msedge.exe"),
+        };
+        return paths.FirstOrDefault(File.Exists);
+    }
+
+    static async Task ConvertHtmlToPdfAsync(byte[] htmlBytes,string outputPdf,CancellationToken ct)
+    {
+        var edge=FindEdge();
+        if(string.IsNullOrWhiteSpace(edge))
+            throw new InvalidOperationException("Microsoft Edge não encontrado para gerar o PDF.");
+
+        var tempHtml=Path.Combine(Path.GetTempPath(),$"marsan-print-{Guid.NewGuid():N}.html");
+        try
+        {
+            await File.WriteAllBytesAsync(tempHtml,htmlBytes,ct);
+            var uri=new Uri(tempHtml).AbsoluteUri;
+            var psi=new ProcessStartInfo
+            {
+                FileName=edge,
+                UseShellExecute=false,
+                CreateNoWindow=true,
+                WindowStyle=ProcessWindowStyle.Hidden,
+                Arguments=$"--headless --disable-gpu --no-first-run --print-to-pdf=\"{outputPdf}\" \"{uri}\""
+            };
+            using var process=Process.Start(psi) ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
+            await process.WaitForExitAsync(ct);
+            if(process.ExitCode!=0 || !File.Exists(outputPdf))
+                throw new InvalidOperationException("Não foi possível converter o documento para PDF.");
+        }
+        finally
+        {
+            try{if(File.Exists(tempHtml))File.Delete(tempHtml);}catch{}
+        }
+    }
+
     public void Dispose(){Stop();cts?.Dispose();}
 }
 
