@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Printing;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -123,17 +125,59 @@ public sealed class AgentApiClient
 
 public sealed class AgentService : IDisposable
 {
-    readonly AgentApiClient api=new(); CancellationTokenSource? cts; Task? loop; readonly HashSet<string> processing=new(StringComparer.OrdinalIgnoreCase);
+    readonly AgentApiClient api=new();
+    CancellationTokenSource? cts;
+    Task? loop;
+    readonly HashSet<string> processing=new(StringComparer.OrdinalIgnoreCase);
     string? lastJobError;
-    public event Action<string>? StatusChanged; public bool IsRunning=>loop is {IsCompleted:false};
-    public void Start(Func<AgentConfig> get){if(IsRunning)return;cts=new();loop=Task.Run(()=>Loop(get,cts.Token));StatusChanged?.Invoke("Iniciado");}
-    public void Stop(){cts?.Cancel();StatusChanged?.Invoke("Parado");}
-    public async Task<bool> TestAsync(AgentConfig c){try{return await api.PingAsync(c);}catch{return false;}}
+
+    public event Action<string>? StatusChanged;
+    public bool IsRunning=>loop is {IsCompleted:false};
+
+    [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern bool SetDefaultPrinter(string pszPrinter);
+
+    [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern bool GetDefaultPrinter(StringBuilder pszBuffer, ref int pcchBuffer);
+
+    public void Start(Func<AgentConfig> get)
+    {
+        if(IsRunning)return;
+        cts=new();
+        loop=Task.Run(()=>Loop(get,cts.Token));
+        StatusChanged?.Invoke("Iniciado");
+    }
+
+    public void Stop()
+    {
+        cts?.Cancel();
+        StatusChanged?.Invoke("Parado");
+    }
+
+    public async Task<bool> TestAsync(AgentConfig c)
+    {
+        try{return await api.PingAsync(c);}catch{return false;}
+    }
+
     public string CreateTestPdf(AgentConfig c)
     {
-        Directory.CreateDirectory(c.OutputFolder);var p=Path.Combine(c.OutputFolder,$"TESTE_MARSAN_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
-        File.WriteAllBytes(p,MinimalPdf.Create());return p;
+        Directory.CreateDirectory(c.OutputFolder);
+        var p=Path.Combine(c.OutputFolder,$"TESTE_MARSAN_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
+        File.WriteAllBytes(p,MinimalPdf.Create());
+        return p;
     }
+
+    public async Task TestPrinterAsync(AgentConfig c)
+    {
+        if(string.IsNullOrWhiteSpace(c.PrinterName))
+            throw new InvalidOperationException("Selecione uma impressora.");
+
+        var html=Encoding.UTF8.GetBytes(@"<!doctype html><html><head><meta charset='utf-8'>
+<style>@page{size:A4;margin:15mm}body{font-family:Arial;color:#173d2d}h1{margin-top:50mm;text-align:center}p{text-align:center;font-size:16px}</style>
+</head><body><h1>Marsan Print Agent</h1><p>Impressão de teste realizada com sucesso.</p></body></html>");
+        await PrintHtmlAsync(html,c.PrinterName,1,CancellationToken.None);
+    }
+
     async Task Loop(Func<AgentConfig> get,CancellationToken ct)
     {
         while(!ct.IsCancellationRequested)
@@ -141,68 +185,174 @@ public sealed class AgentService : IDisposable
             var c=get();
             try
             {
-                if(string.IsNullOrWhiteSpace(c.AgentToken)) StatusChanged?.Invoke("Aguardando token");
+                if(string.IsNullOrWhiteSpace(c.AgentToken))
+                    StatusChanged?.Invoke("Aguardando token");
                 else
                 {
-                    StatusChanged?.Invoke("Conectando...");
+                    if(string.IsNullOrWhiteSpace(lastJobError))
+                        StatusChanged?.Invoke("Conectando...");
+
                     var jobs=await api.GetPendingAsync(c,ct);
-                    if(jobs.Count>0) {
+
+                    if(jobs.Count>0)
+                    {
                         lastJobError=null;
                         StatusChanged?.Invoke($"Conectado • {jobs.Count} pendente(s)");
-                    } else if(string.IsNullOrWhiteSpace(lastJobError)) {
+                    }
+                    else if(string.IsNullOrWhiteSpace(lastJobError))
+                    {
                         StatusChanged?.Invoke("Conectado • 0 pendente(s)");
                     }
+
                     foreach(var j in jobs)
                     {
                         if(ct.IsCancellationRequested||string.IsNullOrWhiteSpace(j.Id)||!processing.Add(j.Id))continue;
-                        try{await Process(j,c,ct);}finally{processing.Remove(j.Id);}
+                        try{await Process(j,c,ct);}
+                        finally{processing.Remove(j.Id);}
                     }
                 }
-            }catch(OperationCanceledException){break;}catch(Exception){StatusChanged?.Invoke("Sem conexão");}
-            try{await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(c.PollSeconds,3,300)),ct);}catch(OperationCanceledException){break;}
+            }
+            catch(OperationCanceledException){break;}
+            catch(Exception ex)
+            {
+                lastJobError=ex.Message;
+                StatusChanged?.Invoke("ERRO • "+ex.Message);
+            }
+
+            try{await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(c.PollSeconds,3,300)),ct);}
+            catch(OperationCanceledException){break;}
         }
     }
+
     async Task Process(PrintJob j,AgentConfig c,CancellationToken ct)
     {
         try
         {
             var doc=await api.DownloadAsync(j,c,ct);
-            Directory.CreateDirectory(c.OutputFolder);
-            string Safe(string? s)=>string.IsNullOrWhiteSpace(s)?"Documento":new string(s.Where(x=>!Path.GetInvalidFileNameChars().Contains(x)).ToArray()).Trim().Replace(' ','_');
-            var p=Path.Combine(c.OutputFolder,$"{DateTime.Now:yyyy-MM-dd_HHmmss}_{Safe(j.CustomerName)}_{Safe(j.Title)}.pdf");
 
-            if(doc.ContentType.Contains("html",StringComparison.OrdinalIgnoreCase))
+            if(c.TestMode)
             {
-                await ConvertHtmlToPdfAsync(doc.Bytes,p,ct);
+                Directory.CreateDirectory(c.OutputFolder);
+                string Safe(string? value)=>string.IsNullOrWhiteSpace(value)
+                    ?"Documento"
+                    :new string(value.Where(x=>!Path.GetInvalidFileNameChars().Contains(x)).ToArray()).Trim().Replace(' ','_');
+
+                var p=Path.Combine(c.OutputFolder,$"{DateTime.Now:yyyy-MM-dd_HHmmss}_{Safe(j.CustomerName)}_{Safe(j.Title)}.pdf");
+
+                if(doc.ContentType.Contains("html",StringComparison.OrdinalIgnoreCase))
+                    await ConvertHtmlToPdfAsync(doc.Bytes,p,ct);
+                else
+                {
+                    var bytes=doc.Bytes;
+                    if(bytes.Length<4||bytes[0]!=0x25||bytes[1]!=0x50||bytes[2]!=0x44||bytes[3]!=0x46)
+                        throw new InvalidOperationException("Documento recebido não é um PDF válido.");
+                    await File.WriteAllBytesAsync(p,bytes,ct);
+                }
+
+                await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
+                lastJobError=null;
+                StatusChanged?.Invoke($"PDF salvo • {Path.GetFileName(p)}");
             }
             else
             {
-                var bytes=doc.Bytes;
-                if(bytes.Length<4||bytes[0]!=0x25||bytes[1]!=0x50||bytes[2]!=0x44||bytes[3]!=0x46)
-                    throw new InvalidOperationException("Documento recebido não é um PDF válido.");
-                await File.WriteAllBytesAsync(p,bytes,ct);
-            }
+                if(string.IsNullOrWhiteSpace(c.PrinterName))
+                    throw new InvalidOperationException("Nenhuma impressora foi selecionada.");
 
-            await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
-            lastJobError=null;
-            StatusChanged?.Invoke($"PDF salvo • {Path.GetFileName(p)}");
+                if(!doc.ContentType.Contains("html",StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Impressão automática requer documento HTML.");
+
+                StatusChanged?.Invoke($"Imprimindo • {j.CustomerName}");
+                await PrintHtmlAsync(doc.Bytes,c.PrinterName,Math.Max(1,j.Copies),ct);
+                await api.CompleteAsync(j.Id,"PRINTED",$"Impresso em {c.PrinterName}",c,ct);
+                lastJobError=null;
+                StatusChanged?.Invoke($"Impresso • {j.CustomerName}");
+            }
         }
         catch(Exception ex)
         {
             lastJobError=ex.Message;
-            StatusChanged?.Invoke("ERRO • " + ex.Message);
+            StatusChanged?.Invoke("ERRO • "+ex.Message);
             try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}
         }
     }
+
     static string? FindEdge()
     {
-        var paths = new[]
+        var paths=new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\Edge\Application\msedge.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"Microsoft\Edge\Application\msedge.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),@"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),@"Microsoft\Edge\Application\msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),@"Microsoft\Edge\Application\msedge.exe"),
         };
         return paths.FirstOrDefault(File.Exists);
+    }
+
+    static string? CurrentDefaultPrinter()
+    {
+        int size=0;
+        GetDefaultPrinter(new StringBuilder(),ref size);
+        if(size<=0)return null;
+        var sb=new StringBuilder(size);
+        return GetDefaultPrinter(sb,ref size)?sb.ToString():null;
+    }
+
+    static async Task PrintHtmlAsync(byte[] htmlBytes,string printerName,int copies,CancellationToken ct)
+    {
+        if(!PrinterSettings.InstalledPrinters.Cast<string>().Any(x=>string.Equals(x,printerName,StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("A impressora selecionada não está instalada no Windows.");
+
+        var edge=FindEdge();
+        if(string.IsNullOrWhiteSpace(edge))
+            throw new InvalidOperationException("Microsoft Edge não encontrado.");
+
+        var originalDefault=CurrentDefaultPrinter();
+        var tempHtml=Path.Combine(Path.GetTempPath(),$"marsan-print-{Guid.NewGuid():N}.html");
+        var profileRoot=Path.Combine(Path.GetTempPath(),$"marsan-print-profile-{Guid.NewGuid():N}");
+
+        try
+        {
+            if(!SetDefaultPrinter(printerName))
+                throw new InvalidOperationException("O Windows não permitiu selecionar a impressora.");
+
+            var html=Encoding.UTF8.GetString(htmlBytes);
+            const string trigger="<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},700);});</script>";
+            var idx=html.LastIndexOf("</body>",StringComparison.OrdinalIgnoreCase);
+            html=idx>=0?html.Insert(idx,trigger):html+trigger;
+            await File.WriteAllTextAsync(tempHtml,html,Encoding.UTF8,ct);
+
+            for(int copy=0;copy<Math.Max(1,copies);copy++)
+            {
+                var profile=Path.Combine(profileRoot,$"copy-{copy+1}");
+                Directory.CreateDirectory(profile);
+                var psi=new ProcessStartInfo
+                {
+                    FileName=edge,
+                    UseShellExecute=false,
+                    CreateNoWindow=true,
+                    WindowStyle=ProcessWindowStyle.Minimized
+                };
+                psi.ArgumentList.Add("--kiosk-printing");
+                psi.ArgumentList.Add("--no-first-run");
+                psi.ArgumentList.Add("--no-default-browser-check");
+                psi.ArgumentList.Add("--allow-file-access-from-files");
+                psi.ArgumentList.Add($"--user-data-dir={profile}");
+                psi.ArgumentList.Add($"--app={new Uri(tempHtml).AbsoluteUri}");
+
+                using var process=System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Não foi possível iniciar o Edge para impressão.");
+
+                await Task.Delay(6500,ct);
+                try{if(!process.HasExited)process.Kill(true);}catch{}
+                if(copy+1<copies)await Task.Delay(700,ct);
+            }
+        }
+        finally
+        {
+            if(!string.IsNullOrWhiteSpace(originalDefault))
+                try{SetDefaultPrinter(originalDefault);}catch{}
+            try{if(File.Exists(tempHtml))File.Delete(tempHtml);}catch{}
+            try{if(Directory.Exists(profileRoot))Directory.Delete(profileRoot,true);}catch{}
+        }
     }
 
     static async Task ConvertHtmlToPdfAsync(byte[] htmlBytes,string outputPdf,CancellationToken ct)
@@ -229,10 +379,9 @@ public sealed class AgentService : IDisposable
                     WindowStyle=ProcessWindowStyle.Hidden,
                     RedirectStandardError=true,
                     RedirectStandardOutput=true,
-                    WorkingDirectory=Path.GetDirectoryName(outputPdf) ?? Environment.CurrentDirectory
+                    WorkingDirectory=Path.GetDirectoryName(outputPdf)??Environment.CurrentDirectory
                 };
-
-                psi.ArgumentList.Add(newHeadless ? "--headless=new" : "--headless");
+                psi.ArgumentList.Add(newHeadless?"--headless=new":"--headless");
                 psi.ArgumentList.Add("--disable-gpu");
                 psi.ArgumentList.Add("--no-first-run");
                 psi.ArgumentList.Add("--no-default-browser-check");
@@ -243,14 +392,14 @@ public sealed class AgentService : IDisposable
                 psi.ArgumentList.Add(uri);
 
                 using var process=System.Diagnostics.Process.Start(psi)
-                    ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
+                    ??throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
 
                 var errTask=process.StandardError.ReadToEndAsync();
                 var outTask=process.StandardOutput.ReadToEndAsync();
                 await process.WaitForExitAsync(ct);
                 var err=await errTask;
                 _=await outTask;
-                return (process.ExitCode,err);
+                return(process.ExitCode,err);
             }
 
             async Task<bool> WaitPdfAsync()
@@ -259,30 +408,25 @@ public sealed class AgentService : IDisposable
                 {
                     if(File.Exists(outputPdf))
                     {
-                        try
-                        {
-                            var info=new FileInfo(outputPdf);
-                            if(info.Length>500) return true;
-                        }
-                        catch {}
+                        try{if(new FileInfo(outputPdf).Length>500)return true;}catch{}
                     }
                     await Task.Delay(250,ct);
                 }
                 return false;
             }
 
-            if(File.Exists(outputPdf)) try{File.Delete(outputPdf);}catch{}
-
+            if(File.Exists(outputPdf))try{File.Delete(outputPdf);}catch{}
             var first=await RunEdgeAsync(true);
+
             if(!await WaitPdfAsync())
             {
-                if(File.Exists(outputPdf)) try{File.Delete(outputPdf);}catch{}
+                if(File.Exists(outputPdf))try{File.Delete(outputPdf);}catch{}
                 var second=await RunEdgeAsync(false);
                 if(!await WaitPdfAsync())
                 {
-                    var detail=string.IsNullOrWhiteSpace(second.Error) ? first.Error : second.Error;
-                    detail=string.IsNullOrWhiteSpace(detail) ? "" : " " + detail.Trim().Replace("\r"," ").Replace("\n"," ");
-                    if(detail.Length>220) detail=detail[..220];
+                    var detail=string.IsNullOrWhiteSpace(second.Error)?first.Error:second.Error;
+                    detail=string.IsNullOrWhiteSpace(detail)?"":" "+detail.Trim().Replace("\r"," ").Replace("\n"," ");
+                    if(detail.Length>220)detail=detail[..220];
                     throw new InvalidOperationException($"O Edge não gerou o arquivo PDF.{detail}");
                 }
             }
@@ -318,307 +462,194 @@ internal static class MinimalPdf
 
 public sealed class MainForm : Form
 {
-    AgentConfig cfg = ConfigStore.Load();
-    readonly AgentService svc = new();
-    readonly NotifyIcon tray = new();
+    AgentConfig cfg=ConfigStore.Load();
+    readonly AgentService svc=new();
+    readonly NotifyIcon tray=new();
 
-    readonly Label statusLabel = new();
-    readonly Label statusDot = new();
-    readonly Label footerLabel = new();
-    readonly TextBox url = new(), agentId = new(), token = new(), folder = new();
-    readonly NumericUpDown poll = new();
-    readonly CheckBox autoStart = new(), testMode = new();
-    readonly Button startStop = new();
+    readonly Label statusLabel=new();
+    readonly Label statusDot=new();
+    readonly Label modeValue=new();
+    readonly Label sideMode=new();
+    readonly Label sideModeHelp=new();
+    readonly TextBox url=new(),agentId=new(),token=new(),folder=new();
+    readonly NumericUpDown poll=new();
+    readonly CheckBox autoStart=new();
+    readonly RadioButton savePdfMode=new(),autoPrintMode=new();
+    readonly ComboBox printers=new();
+    readonly Button startStop=new();
     bool reallyExit;
 
-    static readonly Color Bg = Color.FromArgb(244, 246, 243);
-    static readonly Color Card = Color.White;
-    static readonly Color Green900 = Color.FromArgb(20, 72, 51);
-    static readonly Color Green700 = Color.FromArgb(38, 104, 75);
-    static readonly Color Green100 = Color.FromArgb(232, 242, 236);
-    static readonly Color Gold = Color.FromArgb(194, 159, 92);
-    static readonly Color Ink = Color.FromArgb(31, 42, 36);
-    static readonly Color Muted = Color.FromArgb(105, 116, 109);
-    static readonly Color Border = Color.FromArgb(220, 226, 221);
+    static readonly Color Bg=Color.FromArgb(244,246,243);
+    static readonly Color Card=Color.White;
+    static readonly Color Green900=Color.FromArgb(20,72,51);
+    static readonly Color Green700=Color.FromArgb(38,104,75);
+    static readonly Color Green100=Color.FromArgb(232,242,236);
+    static readonly Color Gold=Color.FromArgb(194,159,92);
+    static readonly Color Ink=Color.FromArgb(31,42,36);
+    static readonly Color Muted=Color.FromArgb(105,116,109);
+    static readonly Color Border=Color.FromArgb(220,226,221);
 
     public MainForm()
     {
-        Text = "Marsan Print Agent";
-        try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
-        Width = 1080;
-        Height = 610;
-        MinimumSize = new Size(920, 560);
-        StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Segoe UI", 9.5f);
-        BackColor = Bg;
-        FormClosing += HandleClosing;
+        Text="Marsan Print Agent";
+        try{Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath)??SystemIcons.Application;}catch{Icon=SystemIcons.Application;}
+        ClientSize=new Size(1000,620);
+        FormBorderStyle=FormBorderStyle.FixedSingle;
+        MaximizeBox=false;
+        MinimizeBox=true;
+        StartPosition=FormStartPosition.CenterScreen;
+        Font=new Font("Segoe UI",9.2f);
+        BackColor=Bg;
+        FormClosing+=HandleClosing;
 
-        var shell = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            BackColor = Bg,
-            Margin = Padding.Empty,
-            Padding = Padding.Empty
-        };
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 235));
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        Controls.Add(shell);
+        var side=BuildSidebar();
+        side.Left=0;side.Top=0;side.Width=220;side.Height=ClientSize.Height;side.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left;
+        Controls.Add(side);
 
-        shell.Controls.Add(BuildSidebar(), 0, 0);
-        shell.Controls.Add(BuildMain(), 1, 0);
+        var main=BuildMain();
+        main.Left=220;main.Top=0;main.Width=780;main.Height=ClientSize.Height;main.Anchor=AnchorStyles.Top|AnchorStyles.Bottom|AnchorStyles.Left|AnchorStyles.Right;
+        Controls.Add(main);
 
         LoadUi();
+        RefreshPrinters();
 
-        svc.StatusChanged += x => BeginInvoke(() => UpdateStatus(x));
+        svc.StatusChanged+=x=>BeginInvoke(()=>UpdateStatus(x));
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Abrir Marsan Print Agent", null, (_, __) =>
+        var menu=new ContextMenuStrip();
+        menu.Items.Add("Abrir Marsan Print Agent",null,(_,__)=>
         {
-            Show();
-            WindowState = FormWindowState.Normal;
-            Activate();
+            Show();WindowState=FormWindowState.Normal;Activate();
         });
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Sair", null, (_, __) =>
+        menu.Items.Add("Sair",null,(_,__)=>
         {
-            reallyExit = true;
-            Close();
+            reallyExit=true;Close();
         });
-        tray.Text = "Marsan Print Agent";
-        try { tray.Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { tray.Icon = SystemIcons.Application; }
-        tray.Visible = true;
-        tray.ContextMenuStrip = menu;
-        tray.DoubleClick += (_, __) =>
-        {
-            Show();
-            WindowState = FormWindowState.Normal;
-            Activate();
-        };
+
+        tray.Text="Marsan Print Agent";
+        try{tray.Icon=System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath)??SystemIcons.Application;}catch{tray.Icon=SystemIcons.Application;}
+        tray.Visible=true;
+        tray.ContextMenuStrip=menu;
+        tray.DoubleClick+=(_,__)=>{Show();WindowState=FormWindowState.Normal;Activate();};
     }
 
     Control BuildSidebar()
     {
-        var side = new Panel { Dock = DockStyle.Fill, BackColor = Green900, Padding = new Padding(20, 24, 20, 20) };
+        var side=new Panel{BackColor=Green900};
 
-        var logo = new Label
+        side.Controls.Add(new Label
         {
-            Text = "M",
-            Width = 52,
-            Height = 52,
-            BackColor = Color.White,
-            ForeColor = Green900,
-            Font = new Font("Segoe UI", 22, FontStyle.Bold),
-            TextAlign = ContentAlignment.MiddleCenter,
-            Left = 20,
-            Top = 24
-        };
-        side.Controls.Add(logo);
-
-        var brand = new Label
+            Text="M",Width=50,Height=50,BackColor=Color.White,ForeColor=Green900,
+            Font=new Font("Segoe UI",21,FontStyle.Bold),TextAlign=ContentAlignment.MiddleCenter,Left=18,Top=22
+        });
+        side.Controls.Add(new Label
         {
-            Text = "MARSAN",
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 17, FontStyle.Bold),
-            AutoSize = true,
-            Left = 82,
-            Top = 26
-        };
-        side.Controls.Add(brand);
-
-        var product = new Label
+            Text="MARSAN",ForeColor=Color.White,Font=new Font("Segoe UI",16,FontStyle.Bold),
+            AutoSize=true,Left=82,Top=24
+        });
+        side.Controls.Add(new Label
         {
-            Text = "Print Agent",
-            ForeColor = Color.FromArgb(204, 222, 212),
-            Font = new Font("Segoe UI", 10.5f),
-            AutoSize = true,
-            Left = 84,
-            Top = 55
-        };
-        side.Controls.Add(product);
-
-        var sep = new Panel { BackColor = Color.FromArgb(63, 108, 87), Height = 1, Width = 195, Left = 20, Top = 100 };
-        side.Controls.Add(sep);
-
-        var navTitle = new Label
+            Text="Print Agent",ForeColor=Color.FromArgb(204,222,212),Font=new Font("Segoe UI",10),
+            AutoSize=true,Left=84,Top=51
+        });
+        side.Controls.Add(new Panel{BackColor=Color.FromArgb(63,108,87),Height=1,Width=184,Left=18,Top=94});
+        side.Controls.Add(new Label
         {
-            Text = "CENTRAL DE IMPRESSÃO",
-            ForeColor = Color.FromArgb(170, 197, 182),
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-            AutoSize = true,
-            Left = 22,
-            Top = 124
-        };
-        side.Controls.Add(navTitle);
-
-        var nav = new Label
+            Text="CENTRAL DE IMPRESSÃO",ForeColor=Color.FromArgb(170,197,182),
+            Font=new Font("Segoe UI",8.2f,FontStyle.Bold),AutoSize=true,Left=20,Top=116
+        });
+        side.Controls.Add(new Label
         {
-            Text = "●   Painel do agente\n\n⚙   Configurações\n\n",
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 10.5f),
-            AutoSize = true,
-            Left = 22,
-            Top = 157
-        };
-        side.Controls.Add(nav);
+            Text="●   Painel do agente\n\n⚙   Configurações",ForeColor=Color.White,
+            Font=new Font("Segoe UI",10),AutoSize=true,Left=20,Top=148
+        });
 
-        var info = new Panel
-        {
-            BackColor = Color.FromArgb(27, 84, 60),
-            Height = 125,
-            Width = 195,
-            Left = 20,
-            Anchor = AnchorStyles.Left | AnchorStyles.Bottom
-        };
-        info.Top = side.Height - 165;
-        side.Resize += (_, __) => info.Top = side.Height - 165;
-
+        var info=new Panel{BackColor=Color.FromArgb(27,84,60),Height=132,Width=184,Left=18,Top=465};
         info.Controls.Add(new Label
         {
-            Text = "MODO ATUAL",
-            ForeColor = Color.FromArgb(164, 197, 179),
-            Font = new Font("Segoe UI", 8, FontStyle.Bold),
-            AutoSize = true,
-            Left = 15,
-            Top = 15
+            Text="MODO ATUAL",ForeColor=Color.FromArgb(164,197,179),
+            Font=new Font("Segoe UI",7.8f,FontStyle.Bold),AutoSize=true,Left=14,Top=13
         });
-        info.Controls.Add(new Label
-        {
-            Text = "Teste / Salvar PDF",
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI", 10, FontStyle.Bold),
-            AutoSize = true,
-            Left = 15,
-            Top = 39
-        });
-        info.Controls.Add(new Label
-        {
-            Text = "A impressora poderá ser\nconfigurada posteriormente.",
-            ForeColor = Color.FromArgb(198, 216, 206),
-            Font = new Font("Segoe UI", 8.5f),
-            AutoSize = true,
-            Left = 15,
-            Top = 70
-        });
+        sideMode.Text="Salvar PDF";
+        sideMode.ForeColor=Color.White;
+        sideMode.Font=new Font("Segoe UI",10,FontStyle.Bold);
+        sideMode.AutoSize=true;sideMode.Left=14;sideMode.Top=37;
+        info.Controls.Add(sideMode);
+
+        sideModeHelp.Text="Os trabalhos são salvos\nna pasta configurada.";
+        sideModeHelp.ForeColor=Color.FromArgb(198,216,206);
+        sideModeHelp.Font=new Font("Segoe UI",8.3f);
+        sideModeHelp.AutoSize=true;sideModeHelp.Left=14;sideModeHelp.Top=67;
+        info.Controls.Add(sideModeHelp);
         side.Controls.Add(info);
-
         return side;
     }
 
     Control BuildMain()
     {
-        var outer = new Panel { Dock = DockStyle.Fill, BackColor = Bg, AutoScroll = true };
+        var main=new Panel{BackColor=Bg};
 
-        var content = new TableLayoutPanel
+        main.Controls.Add(new Label
         {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(28, 24, 28, 26),
-            BackColor = Bg
-        };
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        outer.Controls.Add(content);
-
-        var header = new Panel { Height = 72, Dock = DockStyle.Top, BackColor = Bg };
-        header.Controls.Add(new Label
-        {
-            Text = "Central de impressão",
-            ForeColor = Ink,
-            Font = new Font("Segoe UI", 20, FontStyle.Bold),
-            AutoSize = true,
-            Left = 0,
-            Top = 2
+            Text="Central de impressão",ForeColor=Ink,Font=new Font("Segoe UI",18,FontStyle.Bold),
+            AutoSize=true,Left=28,Top=22
         });
-        header.Controls.Add(new Label
+        main.Controls.Add(new Label
         {
-            Text = "Agente leve para receber e processar impressões remotas da Marsan.",
-            ForeColor = Muted,
-            Font = new Font("Segoe UI", 10),
-            AutoSize = true,
-            Left = 2,
-            Top = 39
+            Text="Receba, salve ou imprima automaticamente os documentos da Marsan.",
+            ForeColor=Muted,Font=new Font("Segoe UI",9.4f),AutoSize=true,Left=30,Top=56
         });
-        content.Controls.Add(header);
 
-        content.Controls.Add(BuildStatusCard());
+        var status=BuildStatusCard();status.Left=28;status.Top=88;status.Width=724;
+        main.Controls.Add(status);
 
-        var spacer1 = new Panel { Height = 14 };
-        content.Controls.Add(spacer1);
+        var settings=BuildSettingsCard();settings.Left=28;settings.Top=200;settings.Width=724;
+        main.Controls.Add(settings);
 
-        content.Controls.Add(BuildSettingsCard());
+        main.Controls.Add(new Label
+        {
+            Text="Marsan Print Agent  •  v1.6 Impressão Automática",ForeColor=Muted,
+            Font=new Font("Segoe UI",8.2f),AutoSize=true,Left=30,Top=592
+        });
 
-
-        footerLabel.Text = "Marsan Print Agent  •  v1.5 Remoto";
-        footerLabel.ForeColor = Muted;
-        footerLabel.Font = new Font("Segoe UI", 8.5f);
-        footerLabel.AutoSize = true;
-        footerLabel.Margin = new Padding(4, 14, 0, 0);
-        content.Controls.Add(footerLabel);
-
-        return outer;
+        return main;
     }
 
     Control BuildStatusCard()
     {
-        var card = CardPanel(112);
+        var card=CardPanel(96);
 
-        statusDot.Text = "●";
-        statusDot.ForeColor = Color.FromArgb(173, 179, 175);
-        statusDot.Font = new Font("Segoe UI", 15, FontStyle.Bold);
-        statusDot.AutoSize = true;
-        statusDot.Left = 24;
-        statusDot.Top = 24;
+        statusDot.Text="●";
+        statusDot.ForeColor=Color.FromArgb(173,179,175);
+        statusDot.Font=new Font("Segoe UI",13,FontStyle.Bold);
+        statusDot.AutoSize=true;statusDot.Left=22;statusDot.Top=29;
         card.Controls.Add(statusDot);
 
         card.Controls.Add(new Label
         {
-            Text = "Status do agente",
-            ForeColor = Muted,
-            Font = new Font("Segoe UI", 9),
-            AutoSize = true,
-            Left = 54,
-            Top = 20
+            Text="Status do agente",ForeColor=Muted,Font=new Font("Segoe UI",8.5f),
+            AutoSize=true,Left=50,Top=17
         });
 
-        statusLabel.Text = "Parado";
-        statusLabel.ForeColor = Ink;
-        statusLabel.Font = new Font("Segoe UI", 16, FontStyle.Bold);
-        statusLabel.AutoSize = true;
-        statusLabel.Left = 54;
-        statusLabel.Top = 42;
+        statusLabel.Text="Parado";
+        statusLabel.ForeColor=Ink;
+        statusLabel.Font=new Font("Segoe UI",13.5f,FontStyle.Bold);
+        statusLabel.AutoSize=false;
+        statusLabel.Width=430;statusLabel.Height=45;statusLabel.Left=50;statusLabel.Top=37;
+        statusLabel.AutoEllipsis=true;
         card.Controls.Add(statusLabel);
 
-        var modeBox = new Panel
-        {
-            Width = 180,
-            Height = 60,
-            BackColor = Green100,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Top = 24
-        };
-        modeBox.Left = card.Width - 204;
-        card.Resize += (_, __) => modeBox.Left = card.Width - 204;
+        var modeBox=new Panel{Width=170,Height=58,BackColor=Green100,Left=530,Top=19};
         modeBox.Controls.Add(new Label
         {
-            Text = "MODO DE OPERAÇÃO",
-            ForeColor = Green700,
-            Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
-            AutoSize = true,
-            Left = 14,
-            Top = 10
+            Text="MODO DE OPERAÇÃO",ForeColor=Green700,Font=new Font("Segoe UI",7.4f,FontStyle.Bold),
+            AutoSize=true,Left=13,Top=9
         });
-        modeBox.Controls.Add(new Label
-        {
-            Text = "Salvar PDF",
-            ForeColor = Green900,
-            Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
-            AutoSize = true,
-            Left = 14,
-            Top = 30
-        });
+        modeValue.Text="Salvar PDF";
+        modeValue.ForeColor=Green900;
+        modeValue.Font=new Font("Segoe UI",10.5f,FontStyle.Bold);
+        modeValue.AutoSize=true;modeValue.Left=13;modeValue.Top=30;
+        modeBox.Controls.Add(modeValue);
         card.Controls.Add(modeBox);
 
         return card;
@@ -626,266 +657,265 @@ public sealed class MainForm : Form
 
     Control BuildSettingsCard()
     {
-        var card = CardPanel(360);
-        card.Padding = new Padding(24);
+        var card=CardPanel(375);
 
         card.Controls.Add(new Label
         {
-            Text = "Configuração do agente",
-            ForeColor = Ink,
-            Font = new Font("Segoe UI", 13, FontStyle.Bold),
-            AutoSize = true,
-            Left = 24,
-            Top = 20
+            Text="Configuração do agente",ForeColor=Ink,Font=new Font("Segoe UI",12.5f,FontStyle.Bold),
+            AutoSize=true,Left=24,Top=16
         });
         card.Controls.Add(new Label
         {
-            Text = "Defina a comunicação com a API e o comportamento deste computador.",
-            ForeColor = Muted,
-            AutoSize = true,
-            Left = 24,
-            Top = 48
+            Text="Comunicação, modo de operação e impressora deste computador.",
+            ForeColor=Muted,AutoSize=true,Left=24,Top=43
         });
 
-        var grid = new TableLayoutPanel
+        url.SetBounds(24,87,325,27);
+        agentId.SetBounds(375,87,325,27);
+        token.SetBounds(24,140,325,27);
+        poll.SetBounds(375,140,325,27);
+        folder.SetBounds(24,193,545,27);
+        printers.SetBounds(24,246,545,29);
+
+        token.UseSystemPasswordChar=true;
+        poll.Minimum=3;poll.Maximum=300;poll.BorderStyle=BorderStyle.FixedSingle;
+        folder.BorderStyle=BorderStyle.FixedSingle;
+        printers.DropDownStyle=ComboBoxStyle.DropDownList;
+
+        AddField(card,"URL da API",url,24,68);
+        AddField(card,"ID deste agente",agentId,375,68);
+        AddField(card,"Token do agente",token,24,121);
+        AddField(card,"Intervalo (segundos)",poll,375,121);
+        AddField(card,"Pasta para PDFs",folder,24,174);
+        AddField(card,"Impressora",printers,24,227);
+
+        var browse=SecondaryButton("Selecionar",120);browse.SetBounds(580,193,120,27);
+        browse.Click+=(_,__)=>
         {
-            Left = 24,
-            Top = 82,
-            Width = card.Width - 48,
-            Height = 190,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-            ColumnCount = 2,
-            RowCount = 3,
-            Margin = Padding.Empty
+            using var x=new FolderBrowserDialog{SelectedPath=folder.Text};
+            if(x.ShowDialog()==DialogResult.OK)folder.Text=x.SelectedPath;
         };
-        card.Resize += (_, __) => grid.Width = card.Width - 48;
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        for (int i = 0; i < 3; i++) grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+        card.Controls.Add(browse);
 
-        grid.Controls.Add(Field("URL da API", url), 0, 0);
-        grid.Controls.Add(Field("ID deste agente", agentId), 1, 0);
-        token.UseSystemPasswordChar = true;
-        grid.Controls.Add(Field("Token do agente", token), 0, 1);
+        var refresh=SecondaryButton("Atualizar",120);refresh.SetBounds(580,246,120,29);
+        refresh.Click+=(_,__)=>RefreshPrinters();
+        card.Controls.Add(refresh);
 
-        poll.Minimum = 3;
-        poll.Maximum = 300;
-        poll.BorderStyle = BorderStyle.FixedSingle;
-        grid.Controls.Add(Field("Intervalo de consulta (segundos)", poll), 1, 1);
+        savePdfMode.Text="Salvar PDF";
+        autoPrintMode.Text="Imprimir automaticamente";
+        savePdfMode.AutoSize=true;autoPrintMode.AutoSize=true;
+        savePdfMode.ForeColor=Ink;autoPrintMode.ForeColor=Ink;
+        savePdfMode.Left=25;savePdfMode.Top=291;
+        autoPrintMode.Left=128;autoPrintMode.Top=291;
+        savePdfMode.CheckedChanged+=(_,__)=>UpdateModeUi();
+        autoPrintMode.CheckedChanged+=(_,__)=>UpdateModeUi();
+        card.Controls.Add(savePdfMode);card.Controls.Add(autoPrintMode);
 
-        var folderPanel = new Panel { Dock = DockStyle.Fill };
-        folder.BorderStyle = BorderStyle.FixedSingle;
-        folder.Dock = DockStyle.Fill;
-        var browse = SecondaryButton("Selecionar", 100);
-        browse.Dock = DockStyle.Right;
-        browse.Margin = new Padding(8, 0, 0, 0);
-        browse.Click += (_, __) =>
-        {
-            using var x = new FolderBrowserDialog { SelectedPath = folder.Text };
-            if (x.ShowDialog() == DialogResult.OK) folder.Text = x.SelectedPath;
-        };
-        folderPanel.Controls.Add(folder);
-        folderPanel.Controls.Add(browse);
-        grid.Controls.Add(Field("Pasta de saída", folderPanel), 0, 2);
-        grid.SetColumnSpan(grid.GetControlFromPosition(0, 2), 2);
-
-        card.Controls.Add(grid);
-
-        testMode.Text = "Modo teste — salvar os trabalhos em PDF";
-        autoStart.Text = "Iniciar automaticamente com o Windows";
-        testMode.AutoSize = true;
-        autoStart.AutoSize = true;
-        testMode.ForeColor = Ink;
-        autoStart.ForeColor = Ink;
-        testMode.Left = 28;
-        testMode.Top = 282;
-        autoStart.Left = 330;
-        autoStart.Top = 282;
-        card.Controls.Add(testMode);
+        autoStart.Text="Iniciar com o Windows";
+        autoStart.AutoSize=true;autoStart.ForeColor=Ink;autoStart.Left=337;autoStart.Top=291;
         card.Controls.Add(autoStart);
 
-        var actions = new FlowLayoutPanel
+        var actions=new FlowLayoutPanel
         {
-            Left = 24,
-            Top = 315,
-            Width = card.Width - 48,
-            Height = 42,
-            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false
+            Left=24,Top=326,Width=676,Height=36,FlowDirection=FlowDirection.LeftToRight,
+            WrapContents=false,Margin=Padding.Empty
         };
-        card.Resize += (_, __) => actions.Width = card.Width - 48;
 
-        startStop.Text = "▶  Iniciar agente";
-        startStop.Width = 145;
-        StylePrimary(startStop);
+        startStop.Text="▶  Iniciar agente";startStop.Width=132;StylePrimary(startStop);
+        var save=SecondaryButton("Salvar",82);
+        var test=SecondaryButton("Testar conexão",112);
+        var testPrint=SecondaryButton("Testar impressão",118);
+        var open=SecondaryButton("Abrir pasta",100);
 
-        var save = SecondaryButton("Salvar", 105);
-        var test = SecondaryButton("Testar conexão", 135);
-        var pdf = SecondaryButton("Criar PDF teste", 135);
-        var open = SecondaryButton("Abrir pasta", 115);
-
-        actions.Controls.AddRange([startStop, save, test, pdf, open]);
+        actions.Controls.AddRange([startStop,save,test,testPrint,open]);
         card.Controls.Add(actions);
 
-        save.Click += (_, __) => SaveUi();
-        startStop.Click += (_, __) => Toggle();
-        test.Click += async (_, __) =>
+        save.Click+=(_,__)=>SaveUi();
+        startStop.Click+=(_,__)=>Toggle();
+
+        test.Click+=async(_,__)=>
         {
             SaveUi();
-            var ok = await svc.TestAsync(cfg);
+            var ok=await svc.TestAsync(cfg);
             MessageBox.Show(
-                ok ? "Conexão realizada com sucesso." : "A API do Print Agent ainda não respondeu. Isso é esperado até publicarmos as rotas.",
-                "Teste de conexão",
-                MessageBoxButtons.OK,
-                ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning
+                ok?"Conexão realizada com sucesso.":"Não foi possível conectar à API.",
+                "Teste de conexão",MessageBoxButtons.OK,
+                ok?MessageBoxIcon.Information:MessageBoxIcon.Warning
             );
         };
-        pdf.Click += (_, __) =>
+
+        testPrint.Click+=async(_,__)=>
         {
             SaveUi();
-            var p = svc.CreateTestPdf(cfg);
-            MessageBox.Show("PDF de teste criado em:\n" + p, "Teste concluído", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if(savePdfMode.Checked)
+            {
+                var p=svc.CreateTestPdf(cfg);
+                MessageBox.Show("PDF de teste criado em:\n"+p,"Teste concluído",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                return;
+            }
+
+            try
+            {
+                testPrint.Enabled=false;
+                await svc.TestPrinterAsync(cfg);
+                MessageBox.Show("Documento enviado para a impressora selecionada.","Teste de impressão",MessageBoxButtons.OK,MessageBoxIcon.Information);
+            }
+            catch(Exception ex)
+            {
+                MessageBox.Show(ex.Message,"Falha na impressão",MessageBoxButtons.OK,MessageBoxIcon.Error);
+            }
+            finally{testPrint.Enabled=true;}
         };
-        open.Click += (_, __) =>
+
+        open.Click+=(_,__)=>
         {
-            SaveUi();
-            Directory.CreateDirectory(cfg.OutputFolder);
-            Process.Start(new ProcessStartInfo("explorer.exe", cfg.OutputFolder) { UseShellExecute = true });
+            SaveUi();Directory.CreateDirectory(cfg.OutputFolder);
+            Process.Start(new ProcessStartInfo("explorer.exe",cfg.OutputFolder){UseShellExecute=true});
         };
 
         return card;
     }
 
-    Panel CardPanel(int height)
+    void AddField(Control parent,string title,Control control,int x,int y)
     {
-        return new Panel
+        parent.Controls.Add(new Label
         {
-            Height = height,
-            Dock = DockStyle.Top,
-            BackColor = Card,
-            Margin = new Padding(0),
-            Padding = Padding.Empty,
-            BorderStyle = BorderStyle.FixedSingle
-        };
+            Text=title,ForeColor=Muted,Font=new Font("Segoe UI",8.1f,FontStyle.Bold),
+            AutoSize=true,Left=x,Top=y
+        });
+        parent.Controls.Add(control);
     }
 
-    Control Field(string title, Control control)
+    Panel CardPanel(int height)=>new()
     {
-        var p = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 16, 8) };
-        var l = new Label
-        {
-            Text = title,
-            ForeColor = Muted,
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-            AutoSize = true,
-            Left = 0,
-            Top = 0
-        };
-        control.Left = 0;
-        control.Top = 23;
-        control.Height = 30;
-        control.Width = p.Width - 16;
-        control.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
-        if (control is TextBox tb) tb.BorderStyle = BorderStyle.FixedSingle;
-        p.Controls.Add(l);
-        p.Controls.Add(control);
-        return p;
-    }
+        Height=height,BackColor=Card,BorderStyle=BorderStyle.FixedSingle
+    };
 
-    Button SecondaryButton(string text, int width)
+    Button SecondaryButton(string text,int width)
     {
-        var b = new Button
+        var b=new Button
         {
-            Text = text,
-            Width = width,
-            Height = 34,
-            BackColor = Color.White,
-            ForeColor = Ink,
-            FlatStyle = FlatStyle.Flat,
-            Margin = new Padding(0, 0, 8, 0),
-            Cursor = Cursors.Hand
+            Text=text,Width=width,Height=30,BackColor=Color.White,ForeColor=Ink,
+            FlatStyle=FlatStyle.Flat,Margin=new Padding(0,0,7,0),Cursor=Cursors.Hand
         };
-        b.FlatAppearance.BorderColor = Border;
-        b.FlatAppearance.BorderSize = 1;
+        b.FlatAppearance.BorderColor=Border;b.FlatAppearance.BorderSize=1;
         return b;
     }
 
     void StylePrimary(Button b)
     {
-        b.Height = 34;
-        b.BackColor = Green700;
-        b.ForeColor = Color.White;
-        b.FlatStyle = FlatStyle.Flat;
-        b.FlatAppearance.BorderSize = 0;
-        b.Margin = new Padding(0, 0, 8, 0);
-        b.Cursor = Cursors.Hand;
-        b.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+        b.Height=30;b.BackColor=Green700;b.ForeColor=Color.White;b.FlatStyle=FlatStyle.Flat;
+        b.FlatAppearance.BorderSize=0;b.Margin=new Padding(0,0,7,0);b.Cursor=Cursors.Hand;
+        b.Font=new Font("Segoe UI",9,FontStyle.Bold);
+    }
+
+    void RefreshPrinters()
+    {
+        var selected=printers.SelectedItem?.ToString()??cfg.PrinterName;
+        printers.Items.Clear();
+        foreach(string printer in PrinterSettings.InstalledPrinters)printers.Items.Add(printer);
+
+        if(!string.IsNullOrWhiteSpace(selected))
+        {
+            var found=printers.Items.Cast<object>().FirstOrDefault(x=>string.Equals(x.ToString(),selected,StringComparison.OrdinalIgnoreCase));
+            if(found!=null)printers.SelectedItem=found;
+        }
+
+        if(printers.SelectedIndex<0&&printers.Items.Count>0)
+        {
+            var defaultName=new PrinterSettings().PrinterName;
+            var found=printers.Items.Cast<object>().FirstOrDefault(x=>string.Equals(x.ToString(),defaultName,StringComparison.OrdinalIgnoreCase));
+            printers.SelectedItem=found??printers.Items[0];
+        }
+    }
+
+    void UpdateModeUi()
+    {
+        var print=autoPrintMode.Checked;
+        printers.Enabled=print;
+        modeValue.Text=print?"Impressão automática":"Salvar PDF";
+        sideMode.Text=print?"Impressão automática":"Salvar PDF";
+        sideModeHelp.Text=print
+            ?"Os trabalhos serão enviados\ndiretamente à impressora."
+            :"Os trabalhos são salvos\nna pasta configurada.";
     }
 
     void UpdateStatus(string value)
     {
-        statusLabel.Text = value;
-        var ok = value.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase) || value.StartsWith("PDF salvo", StringComparison.OrdinalIgnoreCase);
-        var error = value.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase);
-        var waiting = value.Contains("Aguardando", StringComparison.OrdinalIgnoreCase) || value.Contains("Conectando", StringComparison.OrdinalIgnoreCase);
-        statusLabel.ForeColor = error ? Color.FromArgb(164, 55, 45) : Ink;
-        statusDot.ForeColor = error ? Color.FromArgb(190, 65, 52) : ok ? Color.FromArgb(52, 168, 98) : waiting ? Gold : Color.FromArgb(173, 179, 175);
+        statusLabel.Text=value;
+        var len=value.Length;
+        statusLabel.Font=new Font("Segoe UI",len<=34?13.5f:len<=58?11.2f:9.2f,FontStyle.Bold);
+
+        var ok=value.StartsWith("Conectado",StringComparison.OrdinalIgnoreCase)
+            ||value.StartsWith("PDF salvo",StringComparison.OrdinalIgnoreCase)
+            ||value.StartsWith("Impresso",StringComparison.OrdinalIgnoreCase);
+        var error=value.StartsWith("ERRO",StringComparison.OrdinalIgnoreCase);
+        var waiting=value.Contains("Aguardando",StringComparison.OrdinalIgnoreCase)
+            ||value.Contains("Conectando",StringComparison.OrdinalIgnoreCase)
+            ||value.Contains("Imprimindo",StringComparison.OrdinalIgnoreCase);
+
+        statusLabel.ForeColor=error?Color.FromArgb(164,55,45):Ink;
+        statusDot.ForeColor=error?Color.FromArgb(190,65,52):ok?Color.FromArgb(52,168,98):waiting?Gold:Color.FromArgb(173,179,175);
     }
 
     void LoadUi()
     {
-        url.Text = cfg.ApiBaseUrl;
-        agentId.Text = cfg.AgentId;
-        token.Text = cfg.AgentToken;
-        poll.Value = Math.Clamp(cfg.PollSeconds, 3, 300);
-        folder.Text = cfg.OutputFolder;
-        autoStart.Checked = cfg.AutoStart;
-        testMode.Checked = cfg.TestMode;
+        url.Text=cfg.ApiBaseUrl;
+        agentId.Text=cfg.AgentId;
+        token.Text=cfg.AgentToken;
+        poll.Value=Math.Clamp(cfg.PollSeconds,3,300);
+        folder.Text=cfg.OutputFolder;
+        autoStart.Checked=cfg.AutoStart;
+        savePdfMode.Checked=cfg.TestMode;
+        autoPrintMode.Checked=!cfg.TestMode;
+        UpdateModeUi();
         UpdateStatus("Parado");
     }
 
     void SaveUi()
     {
-        cfg.ApiBaseUrl = url.Text.Trim();
-        cfg.AgentId = agentId.Text.Trim();
-        cfg.AgentToken = token.Text.Trim();
-        cfg.PollSeconds = (int)poll.Value;
-        cfg.OutputFolder = folder.Text.Trim();
-        cfg.AutoStart = autoStart.Checked;
-        cfg.TestMode = testMode.Checked;
+        cfg.ApiBaseUrl=url.Text.Trim();
+        cfg.AgentId=agentId.Text.Trim();
+        cfg.AgentToken=token.Text.Trim();
+        cfg.PollSeconds=(int)poll.Value;
+        cfg.OutputFolder=folder.Text.Trim();
+        cfg.AutoStart=autoStart.Checked;
+        cfg.TestMode=savePdfMode.Checked;
+        cfg.PrinterName=printers.SelectedItem?.ToString()??"";
         ConfigStore.Save(cfg);
+        UpdateModeUi();
     }
 
     void Toggle()
     {
         SaveUi();
-        if (svc.IsRunning)
+        if(!cfg.TestMode&&string.IsNullOrWhiteSpace(cfg.PrinterName))
         {
-            svc.Stop();
-            startStop.Text = "▶  Iniciar agente";
-            StylePrimary(startStop);
+            MessageBox.Show("Selecione uma impressora antes de iniciar o modo automático.","Impressora necessária",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+            return;
+        }
+
+        if(svc.IsRunning)
+        {
+            svc.Stop();startStop.Text="▶  Iniciar agente";StylePrimary(startStop);
         }
         else
         {
-            svc.Start(() => cfg);
-            startStop.Text = "■  Parar agente";
-            startStop.BackColor = Color.FromArgb(139, 61, 53);
+            svc.Start(()=>cfg);startStop.Text="■  Parar agente";
+            startStop.BackColor=Color.FromArgb(139,61,53);
         }
     }
 
-    void HandleClosing(object? sender, FormClosingEventArgs e)
+    void HandleClosing(object? sender,FormClosingEventArgs e)
     {
-        if (!reallyExit)
+        if(!reallyExit)
         {
-            e.Cancel = true;
-            Hide();
-            tray.ShowBalloonTip(1800, "Marsan Print Agent", "O agente continua executando em segundo plano.", ToolTipIcon.Info);
+            e.Cancel=true;Hide();
+            tray.ShowBalloonTip(1500,"Marsan Print Agent","O agente continua em segundo plano.",ToolTipIcon.Info);
         }
         else
         {
-            tray.Visible = false;
-            svc.Dispose();
+            tray.Visible=false;svc.Dispose();
         }
     }
 }
