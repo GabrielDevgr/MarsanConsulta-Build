@@ -218,32 +218,74 @@ public sealed class AgentService : IDisposable
             await File.WriteAllBytesAsync(tempHtml,htmlBytes,ct);
             Directory.CreateDirectory(tempProfile);
             var uri=new Uri(tempHtml).AbsoluteUri;
-            var args =
-                $"--headless=new --disable-gpu --no-first-run --no-default-browser-check " +
-                $"--user-data-dir=\"{tempProfile}\" " +
-                $"--print-to-pdf-no-header --print-to-pdf=\"{outputPdf}\" \"{uri}\"";
-            var psi=new ProcessStartInfo
+
+            async Task<(int ExitCode,string Error)> RunEdgeAsync(bool newHeadless)
             {
-                FileName=edge,
-                UseShellExecute=false,
-                CreateNoWindow=true,
-                WindowStyle=ProcessWindowStyle.Hidden,
-                Arguments=args
-            };
-            using var process=System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
-            await process.WaitForExitAsync(ct);
-            if(process.ExitCode!=0)
-                throw new InvalidOperationException($"Edge encerrou com código {process.ExitCode}.");
+                var psi=new ProcessStartInfo
+                {
+                    FileName=edge,
+                    UseShellExecute=false,
+                    CreateNoWindow=true,
+                    WindowStyle=ProcessWindowStyle.Hidden,
+                    RedirectStandardError=true,
+                    RedirectStandardOutput=true,
+                    WorkingDirectory=Path.GetDirectoryName(outputPdf) ?? Environment.CurrentDirectory
+                };
 
-            for(int i=0;i<20 && !File.Exists(outputPdf);i++)
-                await Task.Delay(250,ct);
+                psi.ArgumentList.Add(newHeadless ? "--headless=new" : "--headless");
+                psi.ArgumentList.Add("--disable-gpu");
+                psi.ArgumentList.Add("--no-first-run");
+                psi.ArgumentList.Add("--no-default-browser-check");
+                psi.ArgumentList.Add("--allow-file-access-from-files");
+                psi.ArgumentList.Add($"--user-data-dir={tempProfile}");
+                psi.ArgumentList.Add("--no-pdf-header-footer");
+                psi.ArgumentList.Add($"--print-to-pdf={outputPdf}");
+                psi.ArgumentList.Add(uri);
 
-            if(!File.Exists(outputPdf))
-                throw new InvalidOperationException("O Edge não gerou o arquivo PDF.");
+                using var process=System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
 
-            var info=new FileInfo(outputPdf);
-            if(info.Length<500)
-                throw new InvalidOperationException("O PDF gerado ficou vazio ou inválido.");
+                var errTask=process.StandardError.ReadToEndAsync();
+                var outTask=process.StandardOutput.ReadToEndAsync();
+                await process.WaitForExitAsync(ct);
+                var err=await errTask;
+                _=await outTask;
+                return (process.ExitCode,err);
+            }
+
+            async Task<bool> WaitPdfAsync()
+            {
+                for(int i=0;i<40;i++)
+                {
+                    if(File.Exists(outputPdf))
+                    {
+                        try
+                        {
+                            var info=new FileInfo(outputPdf);
+                            if(info.Length>500) return true;
+                        }
+                        catch {}
+                    }
+                    await Task.Delay(250,ct);
+                }
+                return false;
+            }
+
+            if(File.Exists(outputPdf)) try{File.Delete(outputPdf);}catch{}
+
+            var first=await RunEdgeAsync(true);
+            if(!await WaitPdfAsync())
+            {
+                if(File.Exists(outputPdf)) try{File.Delete(outputPdf);}catch{}
+                var second=await RunEdgeAsync(false);
+                if(!await WaitPdfAsync())
+                {
+                    var detail=string.IsNullOrWhiteSpace(second.Error) ? first.Error : second.Error;
+                    detail=string.IsNullOrWhiteSpace(detail) ? "" : " " + detail.Trim().Replace("\r"," ").Replace("\n"," ");
+                    if(detail.Length>220) detail=detail[..220];
+                    throw new InvalidOperationException($"O Edge não gerou o arquivo PDF.{detail}");
+                }
+            }
         }
         finally
         {
@@ -509,7 +551,7 @@ public sealed class MainForm : Form
         content.Controls.Add(BuildSettingsCard());
 
 
-        footerLabel.Text = "Marsan Print Agent  •  v1.4 Diagnóstico";
+        footerLabel.Text = "Marsan Print Agent  •  v1.5 Remoto";
         footerLabel.ForeColor = Muted;
         footerLabel.Font = new Font("Segoe UI", 8.5f);
         footerLabel.AutoSize = true;
