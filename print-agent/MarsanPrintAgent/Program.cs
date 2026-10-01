@@ -204,7 +204,7 @@ public sealed class MainForm : Form
     static readonly Color Green700 = Color.FromArgb(38, 104, 75);
     static readonly Color Green100 = Color.FromArgb(232, 242, 236);
     static readonly Color Gold = Color.FromArgb(194, 159, 92);
-    static readonly Color Text = Color.FromArgb(31, 42, 36);
+    static readonly Color Ink = Color.FromArgb(31, 42, 36);
     static readonly Color Muted = Color.FromArgb(105, 116, 109);
     static readonly Color Border = Color.FromArgb(220, 226, 221);
 
@@ -217,7 +217,7 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
-        FormClosing += Closing;
+        FormClosing += HandleClosing;
 
         var shell = new TableLayoutPanel
         {
@@ -397,7 +397,7 @@ public sealed class MainForm : Form
         header.Controls.Add(new Label
         {
             Text = "Central de impressão",
-            ForeColor = Text,
+            ForeColor = Ink,
             Font = new Font("Segoe UI", 20, FontStyle.Bold),
             AutoSize = true,
             Left = 0,
@@ -459,7 +459,7 @@ public sealed class MainForm : Form
         });
 
         statusLabel.Text = "Parado";
-        statusLabel.ForeColor = Text;
+        statusLabel.ForeColor = Ink;
         statusLabel.Font = new Font("Segoe UI", 16, FontStyle.Bold);
         statusLabel.AutoSize = true;
         statusLabel.Left = 54;
@@ -507,7 +507,7 @@ public sealed class MainForm : Form
         card.Controls.Add(new Label
         {
             Text = "Configuração do agente",
-            ForeColor = Text,
+            ForeColor = Ink,
             Font = new Font("Segoe UI", 13, FontStyle.Bold),
             AutoSize = true,
             Left = 24,
@@ -570,8 +570,8 @@ public sealed class MainForm : Form
         autoStart.Text = "Iniciar automaticamente com o Windows";
         testMode.AutoSize = true;
         autoStart.AutoSize = true;
-        testMode.ForeColor = Text;
-        autoStart.ForeColor = Text;
+        testMode.ForeColor = Ink;
+        autoStart.ForeColor = Ink;
         testMode.Left = 28;
         testMode.Top = 282;
         autoStart.Left = 330;
@@ -638,7 +638,7 @@ public sealed class MainForm : Form
         card.Controls.Add(new Label
         {
             Text = "Atividade recente",
-            ForeColor = Text,
+            ForeColor = Ink,
             Font = new Font("Segoe UI", 12, FontStyle.Bold),
             AutoSize = true,
             Left = 24,
@@ -660,7 +660,7 @@ public sealed class MainForm : Form
         log.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
         log.BorderStyle = BorderStyle.None;
         log.BackColor = Color.FromArgb(248, 250, 248);
-        log.ForeColor = Text;
+        log.ForeColor = Ink;
         log.Font = new Font("Consolas", 8.7f);
         card.Controls.Add(log);
 
@@ -711,7 +711,7 @@ public sealed class MainForm : Form
             Width = width,
             Height = 34,
             BackColor = Color.White,
-            ForeColor = Text,
+            ForeColor = Ink,
             FlatStyle = FlatStyle.Flat,
             Margin = new Padding(0, 0, 8, 0),
             Cursor = Cursors.Hand
@@ -783,7 +783,7 @@ public sealed class MainForm : Form
         }
     }
 
-    void Closing(object? sender, FormClosingEventArgs e)
+    void HandleClosing(object? sender, FormClosingEventArgs e)
     {
         if (!reallyExit)
         {
