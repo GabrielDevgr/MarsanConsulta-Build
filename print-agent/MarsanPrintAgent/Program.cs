@@ -209,7 +209,7 @@ public sealed class AgentService : IDisposable
                 WindowStyle=ProcessWindowStyle.Hidden,
                 Arguments=$"--headless --disable-gpu --no-first-run --print-to-pdf=\"{outputPdf}\" \"{uri}\""
             };
-            using var process=Process.Start(psi) ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
+            using var process=System.Diagnostics.Process.Start(psi) ?? throw new InvalidOperationException("Não foi possível iniciar o Microsoft Edge.");
             await process.WaitForExitAsync(ct);
             if(process.ExitCode!=0 || !File.Exists(outputPdf))
                 throw new InvalidOperationException("Não foi possível converter o documento para PDF.");
