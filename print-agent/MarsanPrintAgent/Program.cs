@@ -46,7 +46,6 @@ public static class ConfigStore
 {
     public static readonly string BaseFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Marsan Print Agent");
     public static readonly string ConfigPath = Path.Combine(BaseFolder, "config.json");
-    public static readonly string LogPath = Path.Combine(BaseFolder, "agent.log");
     public static AgentConfig Load()
     {
         Directory.CreateDirectory(BaseFolder);
@@ -115,14 +114,14 @@ public sealed class AgentApiClient
 public sealed class AgentService : IDisposable
 {
     readonly AgentApiClient api=new(); CancellationTokenSource? cts; Task? loop; readonly HashSet<string> processing=new(StringComparer.OrdinalIgnoreCase);
-    public event Action<string>? StatusChanged; public event Action<string>? LogAdded; public bool IsRunning=>loop is {IsCompleted:false};
-    public void Start(Func<AgentConfig> get){if(IsRunning)return;cts=new();loop=Task.Run(()=>Loop(get,cts.Token));Log("Agente iniciado.");}
-    public void Stop(){cts?.Cancel();StatusChanged?.Invoke("Parado");Log("Agente parado.");}
-    public async Task<bool> TestAsync(AgentConfig c){try{return await api.PingAsync(c);}catch(Exception ex){Log("Teste: "+ex.Message);return false;}}
+    public event Action<string>? StatusChanged; public bool IsRunning=>loop is {IsCompleted:false};
+    public void Start(Func<AgentConfig> get){if(IsRunning)return;cts=new();loop=Task.Run(()=>Loop(get,cts.Token));StatusChanged?.Invoke("Iniciado");}
+    public void Stop(){cts?.Cancel();StatusChanged?.Invoke("Parado");}
+    public async Task<bool> TestAsync(AgentConfig c){try{return await api.PingAsync(c);}catch{return false;}}
     public string CreateTestPdf(AgentConfig c)
     {
         Directory.CreateDirectory(c.OutputFolder);var p=Path.Combine(c.OutputFolder,$"TESTE_MARSAN_{DateTime.Now:yyyyMMdd_HHmmss}.pdf");
-        File.WriteAllBytes(p,MinimalPdf.Create());Log("PDF teste criado: "+p);return p;
+        File.WriteAllBytes(p,MinimalPdf.Create());return p;
     }
     async Task Loop(Func<AgentConfig> get,CancellationToken ct)
     {
@@ -142,7 +141,7 @@ public sealed class AgentService : IDisposable
                         try{await Process(j,c,ct);}finally{processing.Remove(j.Id);}
                     }
                 }
-            }catch(OperationCanceledException){break;}catch(Exception ex){StatusChanged?.Invoke("Sem conexão");Log("Erro: "+ex.Message);}
+            }catch(OperationCanceledException){break;}catch(Exception){StatusChanged?.Invoke("Sem conexão");}
             try{await Task.Delay(TimeSpan.FromSeconds(Math.Clamp(c.PollSeconds,3,300)),ct);}catch(OperationCanceledException){break;}
         }
     }
@@ -155,11 +154,9 @@ public sealed class AgentService : IDisposable
             Directory.CreateDirectory(c.OutputFolder);
             string Safe(string? s)=>string.IsNullOrWhiteSpace(s)?"Documento":new string(s.Where(x=>!Path.GetInvalidFileNameChars().Contains(x)).ToArray()).Trim().Replace(' ','_');
             var p=Path.Combine(c.OutputFolder,$"{DateTime.Now:yyyy-MM-dd_HHmmss}_{Safe(j.CustomerName)}_{Safe(j.Title)}.pdf");
-            await File.WriteAllBytesAsync(p,bytes,ct);Log($"Trabalho {j.Id} salvo: {p}");
-            await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
-        }catch(Exception ex){Log($"Erro no trabalho {j.Id}: {ex.Message}");try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}}
+            await File.WriteAllBytesAsync(p,bytes,ct);await api.CompleteAsync(j.Id,"SAVED",$"Salvo em {p}",c,ct);
+        }catch(Exception ex){try{await api.CompleteAsync(j.Id,"ERROR",ex.Message,c,ct);}catch{}}
     }
-    void Log(string m){var l=$"{DateTime.Now:dd/MM/yyyy HH:mm:ss}  {m}";try{Directory.CreateDirectory(ConfigStore.BaseFolder);File.AppendAllText(ConfigStore.LogPath,l+Environment.NewLine);}catch{}LogAdded?.Invoke(l);}
     public void Dispose(){Stop();cts?.Dispose();}
 }
 
@@ -194,7 +191,6 @@ public sealed class MainForm : Form
     readonly TextBox url = new(), agentId = new(), token = new(), folder = new();
     readonly NumericUpDown poll = new();
     readonly CheckBox autoStart = new(), testMode = new();
-    readonly ListBox log = new();
     readonly Button startStop = new();
     bool reallyExit;
 
@@ -212,8 +208,8 @@ public sealed class MainForm : Form
     {
         Text = "Marsan Print Agent";
         Width = 1080;
-        Height = 720;
-        MinimumSize = new Size(920, 640);
+        Height = 610;
+        MinimumSize = new Size(920, 560);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
@@ -238,11 +234,6 @@ public sealed class MainForm : Form
         LoadUi();
 
         svc.StatusChanged += x => BeginInvoke(() => UpdateStatus(x));
-        svc.LogAdded += x => BeginInvoke(() =>
-        {
-            log.Items.Insert(0, x);
-            while (log.Items.Count > 200) log.Items.RemoveAt(log.Items.Count - 1);
-        });
 
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir Marsan Print Agent", null, (_, __) =>
@@ -325,7 +316,7 @@ public sealed class MainForm : Form
 
         var nav = new Label
         {
-            Text = "●   Painel do agente\n\n⚙   Configurações\n\n▣   Histórico",
+            Text = "●   Painel do agente\n\n⚙   Configurações\n\n",
             ForeColor = Color.White,
             Font = new Font("Segoe UI", 10.5f),
             AutoSize = true,
@@ -386,7 +377,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 4,
             Padding = new Padding(28, 24, 28, 26),
             BackColor = Bg
         };
@@ -405,7 +396,7 @@ public sealed class MainForm : Form
         });
         header.Controls.Add(new Label
         {
-            Text = "Gerencie o agente responsável pelas impressões remotas da Marsan.",
+            Text = "Agente leve para receber e processar impressões remotas da Marsan.",
             ForeColor = Muted,
             Font = new Font("Segoe UI", 10),
             AutoSize = true,
@@ -421,12 +412,8 @@ public sealed class MainForm : Form
 
         content.Controls.Add(BuildSettingsCard());
 
-        var spacer2 = new Panel { Height = 14 };
-        content.Controls.Add(spacer2);
 
-        content.Controls.Add(BuildLogCard());
-
-        footerLabel.Text = "Marsan Print Agent  •  v1.1";
+        footerLabel.Text = "Marsan Print Agent  •  v1.2 Lite";
         footerLabel.ForeColor = Muted;
         footerLabel.Font = new Font("Segoe UI", 8.5f);
         footerLabel.AutoSize = true;
@@ -632,41 +619,6 @@ public sealed class MainForm : Form
         return card;
     }
 
-    Control BuildLogCard()
-    {
-        var card = CardPanel(190);
-        card.Controls.Add(new Label
-        {
-            Text = "Atividade recente",
-            ForeColor = Ink,
-            Font = new Font("Segoe UI", 12, FontStyle.Bold),
-            AutoSize = true,
-            Left = 24,
-            Top = 18
-        });
-        card.Controls.Add(new Label
-        {
-            Text = "Eventos do agente, testes e trabalhos recebidos.",
-            ForeColor = Muted,
-            AutoSize = true,
-            Left = 24,
-            Top = 44
-        });
-
-        log.Left = 24;
-        log.Top = 72;
-        log.Width = card.Width - 48;
-        log.Height = 98;
-        log.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
-        log.BorderStyle = BorderStyle.None;
-        log.BackColor = Color.FromArgb(248, 250, 248);
-        log.ForeColor = Ink;
-        log.Font = new Font("Consolas", 8.7f);
-        card.Controls.Add(log);
-
-        return card;
-    }
-
     Panel CardPanel(int height)
     {
         return new Panel
@@ -763,7 +715,6 @@ public sealed class MainForm : Form
         cfg.AutoStart = autoStart.Checked;
         cfg.TestMode = testMode.Checked;
         ConfigStore.Save(cfg);
-        log.Items.Insert(0, $"{DateTime.Now:dd/MM/yyyy HH:mm:ss}  Configurações salvas.");
     }
 
     void Toggle()
