@@ -14,6 +14,43 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Generate Marsan icon
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $size = 256
+          $bmp = New-Object System.Drawing.Bitmap $size, $size
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $green = [System.Drawing.Color]::FromArgb(23,61,45)
+          $gold = [System.Drawing.Color]::FromArgb(199,168,107)
+          $g.Clear($green)
+          $scale = $size / 48.0
+          $pts = @(
+            [System.Drawing.PointF]::new(10*$scale,34*$scale),
+            [System.Drawing.PointF]::new(10*$scale,14*$scale),
+            [System.Drawing.PointF]::new(16*$scale,14*$scale),
+            [System.Drawing.PointF]::new(24*$scale,24*$scale),
+            [System.Drawing.PointF]::new(32*$scale,14*$scale),
+            [System.Drawing.PointF]::new(38*$scale,14*$scale),
+            [System.Drawing.PointF]::new(38*$scale,34*$scale),
+            [System.Drawing.PointF]::new(32*$scale,34*$scale),
+            [System.Drawing.PointF]::new(32*$scale,23*$scale),
+            [System.Drawing.PointF]::new(24*$scale,33*$scale),
+            [System.Drawing.PointF]::new(16*$scale,23*$scale),
+            [System.Drawing.PointF]::new(16*$scale,34*$scale)
+          )
+          $brush = New-Object System.Drawing.SolidBrush $gold
+          $g.FillPolygon($brush, $pts)
+          $hIcon = $bmp.GetHicon()
+          $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+          $out = "print-agent/MarsanPrintAgent/marsan.ico"
+          $fs = [System.IO.File]::Create($out)
+          $icon.Save($fs)
+          $fs.Close()
+          $brush.Dispose()
+          $g.Dispose()
+          $bmp.Dispose()
       - name: Publish Windows x64
         run: dotnet publish print-agent/MarsanPrintAgent/MarsanPrintAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
       - uses: actions/upload-artifact@v4
