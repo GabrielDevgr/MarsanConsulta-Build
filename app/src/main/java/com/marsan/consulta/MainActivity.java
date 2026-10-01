@@ -17,6 +17,7 @@ import android.webkit.WebViewClient;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -79,6 +80,67 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void printCurrentView() {
             runOnUiThread(() -> { PrintManager printManager = (PrintManager) context.getSystemService(Context.PRINT_SERVICE); PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter("Marsan Consulta"); PrintAttributes attributes = new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4.asLandscape()).setColorMode(PrintAttributes.COLOR_MODE_COLOR).setMinMargins(PrintAttributes.Margins.NO_MARGINS).build(); printManager.print("Marsan Consulta", adapter, attributes); });
+        }
+        @JavascriptInterface public void requestRemotePrint(String customerName, String title, String html) {
+            executor.execute(() -> {
+                HttpURLConnection connection = null;
+                try {
+                    URL url = new URL(ApiConfig.PRINT_URL);
+                    connection = (HttpURLConnection) url.openConnection();
+                    connection.setRequestMethod("POST");
+                    connection.setConnectTimeout(15000);
+                    connection.setReadTimeout(30000);
+                    connection.setDoOutput(true);
+                    connection.setRequestProperty("Accept", "application/json");
+                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    connection.setRequestProperty("x-marsan-consulta-key", ApiConfig.API_KEY);
+
+                    JSONObject payload = new JSONObject();
+                    payload.put("customerName", customerName);
+                    payload.put("title", title);
+                    payload.put("documentType", "controle_saldo");
+                    payload.put("documentFormat", "html");
+                    payload.put("documentContent", html);
+                    payload.put("copies", 1);
+                    payload.put("requestedBy", "Marsan Consulta");
+
+                    byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
+                    connection.setFixedLengthStreamingMode(bytes.length);
+                    try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+
+                    int status = connection.getResponseCode();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(
+                        status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream(),
+                        StandardCharsets.UTF_8
+                    ));
+                    StringBuilder body = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) body.append(line);
+                    reader.close();
+
+                    if (status >= 200 && status < 300) {
+                        sendRemotePrintResult(true, "Enviado para a Marsan.");
+                    } else {
+                        String message = "Falha ao enviar para impressão (HTTP " + status + ")";
+                        try {
+                            String apiMessage = new JSONObject(body.toString()).optString("error");
+                            if (!apiMessage.isEmpty()) message = apiMessage;
+                        } catch (Exception ignored) {}
+                        sendRemotePrintResult(false, message);
+                    }
+                } catch (Exception error) {
+                    sendRemotePrintResult(false, "Não foi possível enviar a impressão. Verifique a internet.");
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+            });
+        }
+
+        private void sendRemotePrintResult(boolean ok, String message) {
+            String safe = JSONObject.quote(message);
+            runOnUiThread(() -> webView.evaluateJavascript(
+                "window.Marsan.receiveRemotePrint(" + (ok ? "true" : "false") + "," + safe + ")", null
+            ));
         }
         private void sendError(String message) { String safe = JSONObject.quote(message); runOnUiThread(() -> webView.evaluateJavascript("window.Marsan.receiveError(" + safe + ")", null)); }
     }
