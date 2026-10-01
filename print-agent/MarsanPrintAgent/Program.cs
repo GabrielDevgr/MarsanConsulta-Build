@@ -182,31 +182,619 @@ internal static class MinimalPdf
     }
 }
 
-public sealed class MainForm:Form
+public sealed class MainForm : Form
 {
-    AgentConfig cfg=ConfigStore.Load(); readonly AgentService svc=new(); readonly NotifyIcon tray=new();
-    readonly Label status=new(); readonly TextBox url=new(),agentId=new(),token=new(),folder=new(); readonly NumericUpDown poll=new();
-    readonly CheckBox autoStart=new(),testMode=new(); readonly ListBox log=new(); readonly Button startStop=new(); bool reallyExit;
+    AgentConfig cfg = ConfigStore.Load();
+    readonly AgentService svc = new();
+    readonly NotifyIcon tray = new();
+
+    readonly Label statusLabel = new();
+    readonly Label statusDot = new();
+    readonly Label footerLabel = new();
+    readonly TextBox url = new(), agentId = new(), token = new(), folder = new();
+    readonly NumericUpDown poll = new();
+    readonly CheckBox autoStart = new(), testMode = new();
+    readonly ListBox log = new();
+    readonly Button startStop = new();
+    bool reallyExit;
+
+    static readonly Color Bg = Color.FromArgb(244, 246, 243);
+    static readonly Color Card = Color.White;
+    static readonly Color Green900 = Color.FromArgb(20, 72, 51);
+    static readonly Color Green700 = Color.FromArgb(38, 104, 75);
+    static readonly Color Green100 = Color.FromArgb(232, 242, 236);
+    static readonly Color Gold = Color.FromArgb(194, 159, 92);
+    static readonly Color Text = Color.FromArgb(31, 42, 36);
+    static readonly Color Muted = Color.FromArgb(105, 116, 109);
+    static readonly Color Border = Color.FromArgb(220, 226, 221);
+
     public MainForm()
     {
-        Text="Marsan Print Agent";Width=820;Height=610;MinimumSize=new Size(760,560);StartPosition=FormStartPosition.CenterScreen;Font=new Font("Segoe UI",9);BackColor=Color.FromArgb(244,241,232);FormClosing+=Closing;
-        var h=new Panel{Dock=DockStyle.Top,Height=78,BackColor=Color.FromArgb(23,61,45)};var t=new Label{Text="MARSAN PRINT AGENT",ForeColor=Color.White,Font=new Font("Segoe UI",18,FontStyle.Bold),AutoSize=true,Left=22,Top=15};var s=new Label{Text="Impressão remota • modo de teste",ForeColor=Color.Gainsboro,AutoSize=true,Left=24,Top=48};status.Text="Parado";status.ForeColor=Color.White;status.AutoSize=true;status.Font=new Font("Segoe UI",10,FontStyle.Bold);status.Top=29;h.Controls.AddRange([t,s,status]);h.Resize+=(_,__)=>status.Left=h.Width-status.Width-24;Controls.Add(h);
-        var b=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(18),ColumnCount=2,RowCount=8};b.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,165));b.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));for(int i=0;i<7;i++)b.RowStyles.Add(new RowStyle(SizeType.Absolute,44));b.RowStyles.Add(new RowStyle(SizeType.Percent,100));Controls.Add(b);
-        void Row(int r,string l,Control c){b.Controls.Add(new Label{Text=l,AutoSize=true,Padding=new Padding(0,9,0,0)},0,r);c.Dock=DockStyle.Fill;b.Controls.Add(c,1,r);}
-        Row(0,"URL da API",url);Row(1,"ID deste agente",agentId);token.UseSystemPasswordChar=true;Row(2,"Token do agente",token);poll.Minimum=3;poll.Maximum=300;Row(3,"Intervalo (seg.)",poll);
-        var fp=new Panel{Dock=DockStyle.Fill};folder.Dock=DockStyle.Fill;var browse=new Button{Text="Selecionar...",Dock=DockStyle.Right,Width=110};browse.Click+=(_,__)=>{using var x=new FolderBrowserDialog{SelectedPath=folder.Text};if(x.ShowDialog()==DialogResult.OK)folder.Text=x.SelectedPath;};fp.Controls.Add(folder);fp.Controls.Add(browse);Row(4,"Pasta de saída",fp);
-        var ck=new FlowLayoutPanel{Dock=DockStyle.Fill};testMode.Text="Modo teste (salvar PDF)";autoStart.Text="Iniciar com o Windows";ck.Controls.AddRange([testMode,autoStart]);Row(5,"Opções",ck);
-        var ac=new FlowLayoutPanel{Dock=DockStyle.Fill};startStop.Text="Iniciar agente";startStop.Width=120;startStop.Height=32;startStop.BackColor=Color.FromArgb(40,92,69);startStop.ForeColor=Color.White;startStop.FlatStyle=FlatStyle.Flat;var save=new Button{Text="Salvar configurações",Width=150,Height=32};var test=new Button{Text="Testar conexão",Width=120,Height=32};var pdf=new Button{Text="Criar PDF teste",Width=120,Height=32};var open=new Button{Text="Abrir pasta",Width=100,Height=32};ac.Controls.AddRange([startStop,save,test,pdf,open]);Row(6,"Ações",ac);
-        log.Dock=DockStyle.Fill;log.Font=new Font("Consolas",8.5f);b.Controls.Add(new Label{Text="Histórico / Log",AutoSize=true,Padding=new Padding(0,5,0,0)},0,7);b.Controls.Add(log,1,7);
-        LoadUi();save.Click+=(_,__)=>SaveUi();startStop.Click+=(_,__)=>Toggle();
-        test.Click+=async(_,__)=>{SaveUi();var ok=await svc.TestAsync(cfg);MessageBox.Show(ok?"Conexão realizada com sucesso.":"API do Print Agent ainda não respondeu. Isso é esperado até publicarmos as rotas.","Teste",MessageBoxButtons.OK,ok?MessageBoxIcon.Information:MessageBoxIcon.Warning);};
-        pdf.Click+=(_,__)=>{SaveUi();var p=svc.CreateTestPdf(cfg);MessageBox.Show("PDF criado em:\n"+p);};
-        open.Click+=(_,__)=>{SaveUi();Directory.CreateDirectory(cfg.OutputFolder);Process.Start(new ProcessStartInfo("explorer.exe",cfg.OutputFolder){UseShellExecute=true});};
-        svc.StatusChanged+=x=>BeginInvoke(()=>{status.Text=x;status.Left=h.Width-status.Width-24;});svc.LogAdded+=x=>BeginInvoke(()=>{log.Items.Insert(0,x);while(log.Items.Count>200)log.Items.RemoveAt(log.Items.Count-1);});
-        var menu=new ContextMenuStrip();menu.Items.Add("Abrir",null,(_,__)=>{Show();WindowState=FormWindowState.Normal;Activate();});menu.Items.Add("Sair",null,(_,__)=>{reallyExit=true;Close();});tray.Text="Marsan Print Agent";tray.Icon=SystemIcons.Application;tray.Visible=true;tray.ContextMenuStrip=menu;tray.DoubleClick+=(_,__)=>{Show();WindowState=FormWindowState.Normal;Activate();};
+        Text = "Marsan Print Agent";
+        Width = 1080;
+        Height = 720;
+        MinimumSize = new Size(920, 640);
+        StartPosition = FormStartPosition.CenterScreen;
+        Font = new Font("Segoe UI", 9.5f);
+        BackColor = Bg;
+        FormClosing += Closing;
+
+        var shell = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            BackColor = Bg,
+            Margin = Padding.Empty,
+            Padding = Padding.Empty
+        };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 235));
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        Controls.Add(shell);
+
+        shell.Controls.Add(BuildSidebar(), 0, 0);
+        shell.Controls.Add(BuildMain(), 1, 0);
+
+        LoadUi();
+
+        svc.StatusChanged += x => BeginInvoke(() => UpdateStatus(x));
+        svc.LogAdded += x => BeginInvoke(() =>
+        {
+            log.Items.Insert(0, x);
+            while (log.Items.Count > 200) log.Items.RemoveAt(log.Items.Count - 1);
+        });
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Abrir Marsan Print Agent", null, (_, __) =>
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+        });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Sair", null, (_, __) =>
+        {
+            reallyExit = true;
+            Close();
+        });
+        tray.Text = "Marsan Print Agent";
+        tray.Icon = SystemIcons.Application;
+        tray.Visible = true;
+        tray.ContextMenuStrip = menu;
+        tray.DoubleClick += (_, __) =>
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+        };
     }
-    void LoadUi(){url.Text=cfg.ApiBaseUrl;agentId.Text=cfg.AgentId;token.Text=cfg.AgentToken;poll.Value=Math.Clamp(cfg.PollSeconds,3,300);folder.Text=cfg.OutputFolder;autoStart.Checked=cfg.AutoStart;testMode.Checked=cfg.TestMode;}
-    void SaveUi(){cfg.ApiBaseUrl=url.Text.Trim();cfg.AgentId=agentId.Text.Trim();cfg.AgentToken=token.Text.Trim();cfg.PollSeconds=(int)poll.Value;cfg.OutputFolder=folder.Text.Trim();cfg.AutoStart=autoStart.Checked;cfg.TestMode=testMode.Checked;ConfigStore.Save(cfg);log.Items.Insert(0,$"{DateTime.Now:HH:mm:ss} Configurações salvas.");}
-    void Toggle(){SaveUi();if(svc.IsRunning){svc.Stop();startStop.Text="Iniciar agente";}else{svc.Start(()=>cfg);startStop.Text="Parar agente";}}
-    void Closing(object? s,FormClosingEventArgs e){if(!reallyExit){e.Cancel=true;Hide();tray.ShowBalloonTip(1800,"Marsan Print Agent","O agente continua executando em segundo plano.",ToolTipIcon.Info);}else{tray.Visible=false;svc.Dispose();}}
+
+    Control BuildSidebar()
+    {
+        var side = new Panel { Dock = DockStyle.Fill, BackColor = Green900, Padding = new Padding(20, 24, 20, 20) };
+
+        var logo = new Label
+        {
+            Text = "M",
+            Width = 52,
+            Height = 52,
+            BackColor = Color.White,
+            ForeColor = Green900,
+            Font = new Font("Segoe UI", 22, FontStyle.Bold),
+            TextAlign = ContentAlignment.MiddleCenter,
+            Left = 20,
+            Top = 24
+        };
+        side.Controls.Add(logo);
+
+        var brand = new Label
+        {
+            Text = "MARSAN",
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 17, FontStyle.Bold),
+            AutoSize = true,
+            Left = 82,
+            Top = 26
+        };
+        side.Controls.Add(brand);
+
+        var product = new Label
+        {
+            Text = "Print Agent",
+            ForeColor = Color.FromArgb(204, 222, 212),
+            Font = new Font("Segoe UI", 10.5f),
+            AutoSize = true,
+            Left = 84,
+            Top = 55
+        };
+        side.Controls.Add(product);
+
+        var sep = new Panel { BackColor = Color.FromArgb(63, 108, 87), Height = 1, Width = 195, Left = 20, Top = 100 };
+        side.Controls.Add(sep);
+
+        var navTitle = new Label
+        {
+            Text = "CENTRAL DE IMPRESSÃO",
+            ForeColor = Color.FromArgb(170, 197, 182),
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            AutoSize = true,
+            Left = 22,
+            Top = 124
+        };
+        side.Controls.Add(navTitle);
+
+        var nav = new Label
+        {
+            Text = "●   Painel do agente\n\n⚙   Configurações\n\n▣   Histórico",
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 10.5f),
+            AutoSize = true,
+            Left = 22,
+            Top = 157
+        };
+        side.Controls.Add(nav);
+
+        var info = new Panel
+        {
+            BackColor = Color.FromArgb(27, 84, 60),
+            Height = 125,
+            Width = 195,
+            Left = 20,
+            Anchor = AnchorStyles.Left | AnchorStyles.Bottom
+        };
+        info.Top = side.Height - 165;
+        side.Resize += (_, __) => info.Top = side.Height - 165;
+
+        info.Controls.Add(new Label
+        {
+            Text = "MODO ATUAL",
+            ForeColor = Color.FromArgb(164, 197, 179),
+            Font = new Font("Segoe UI", 8, FontStyle.Bold),
+            AutoSize = true,
+            Left = 15,
+            Top = 15
+        });
+        info.Controls.Add(new Label
+        {
+            Text = "Teste / Salvar PDF",
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            AutoSize = true,
+            Left = 15,
+            Top = 39
+        });
+        info.Controls.Add(new Label
+        {
+            Text = "A impressora poderá ser\nconfigurada posteriormente.",
+            ForeColor = Color.FromArgb(198, 216, 206),
+            Font = new Font("Segoe UI", 8.5f),
+            AutoSize = true,
+            Left = 15,
+            Top = 70
+        });
+        side.Controls.Add(info);
+
+        return side;
+    }
+
+    Control BuildMain()
+    {
+        var outer = new Panel { Dock = DockStyle.Fill, BackColor = Bg, AutoScroll = true };
+
+        var content = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(28, 24, 28, 26),
+            BackColor = Bg
+        };
+        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        outer.Controls.Add(content);
+
+        var header = new Panel { Height = 72, Dock = DockStyle.Top, BackColor = Bg };
+        header.Controls.Add(new Label
+        {
+            Text = "Central de impressão",
+            ForeColor = Text,
+            Font = new Font("Segoe UI", 20, FontStyle.Bold),
+            AutoSize = true,
+            Left = 0,
+            Top = 2
+        });
+        header.Controls.Add(new Label
+        {
+            Text = "Gerencie o agente responsável pelas impressões remotas da Marsan.",
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 10),
+            AutoSize = true,
+            Left = 2,
+            Top = 39
+        });
+        content.Controls.Add(header);
+
+        content.Controls.Add(BuildStatusCard());
+
+        var spacer1 = new Panel { Height = 14 };
+        content.Controls.Add(spacer1);
+
+        content.Controls.Add(BuildSettingsCard());
+
+        var spacer2 = new Panel { Height = 14 };
+        content.Controls.Add(spacer2);
+
+        content.Controls.Add(BuildLogCard());
+
+        footerLabel.Text = "Marsan Print Agent  •  v1.1";
+        footerLabel.ForeColor = Muted;
+        footerLabel.Font = new Font("Segoe UI", 8.5f);
+        footerLabel.AutoSize = true;
+        footerLabel.Margin = new Padding(4, 14, 0, 0);
+        content.Controls.Add(footerLabel);
+
+        return outer;
+    }
+
+    Control BuildStatusCard()
+    {
+        var card = CardPanel(112);
+
+        statusDot.Text = "●";
+        statusDot.ForeColor = Color.FromArgb(173, 179, 175);
+        statusDot.Font = new Font("Segoe UI", 15, FontStyle.Bold);
+        statusDot.AutoSize = true;
+        statusDot.Left = 24;
+        statusDot.Top = 24;
+        card.Controls.Add(statusDot);
+
+        card.Controls.Add(new Label
+        {
+            Text = "Status do agente",
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 9),
+            AutoSize = true,
+            Left = 54,
+            Top = 20
+        });
+
+        statusLabel.Text = "Parado";
+        statusLabel.ForeColor = Text;
+        statusLabel.Font = new Font("Segoe UI", 16, FontStyle.Bold);
+        statusLabel.AutoSize = true;
+        statusLabel.Left = 54;
+        statusLabel.Top = 42;
+        card.Controls.Add(statusLabel);
+
+        var modeBox = new Panel
+        {
+            Width = 180,
+            Height = 60,
+            BackColor = Green100,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Top = 24
+        };
+        modeBox.Left = card.Width - 204;
+        card.Resize += (_, __) => modeBox.Left = card.Width - 204;
+        modeBox.Controls.Add(new Label
+        {
+            Text = "MODO DE OPERAÇÃO",
+            ForeColor = Green700,
+            Font = new Font("Segoe UI", 7.8f, FontStyle.Bold),
+            AutoSize = true,
+            Left = 14,
+            Top = 10
+        });
+        modeBox.Controls.Add(new Label
+        {
+            Text = "Salvar PDF",
+            ForeColor = Green900,
+            Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
+            AutoSize = true,
+            Left = 14,
+            Top = 30
+        });
+        card.Controls.Add(modeBox);
+
+        return card;
+    }
+
+    Control BuildSettingsCard()
+    {
+        var card = CardPanel(360);
+        card.Padding = new Padding(24);
+
+        card.Controls.Add(new Label
+        {
+            Text = "Configuração do agente",
+            ForeColor = Text,
+            Font = new Font("Segoe UI", 13, FontStyle.Bold),
+            AutoSize = true,
+            Left = 24,
+            Top = 20
+        });
+        card.Controls.Add(new Label
+        {
+            Text = "Defina a comunicação com a API e o comportamento deste computador.",
+            ForeColor = Muted,
+            AutoSize = true,
+            Left = 24,
+            Top = 48
+        });
+
+        var grid = new TableLayoutPanel
+        {
+            Left = 24,
+            Top = 82,
+            Width = card.Width - 48,
+            Height = 190,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            ColumnCount = 2,
+            RowCount = 3,
+            Margin = Padding.Empty
+        };
+        card.Resize += (_, __) => grid.Width = card.Width - 48;
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        for (int i = 0; i < 3; i++) grid.RowStyles.Add(new RowStyle(SizeType.Percent, 33.33f));
+
+        grid.Controls.Add(Field("URL da API", url), 0, 0);
+        grid.Controls.Add(Field("ID deste agente", agentId), 1, 0);
+        token.UseSystemPasswordChar = true;
+        grid.Controls.Add(Field("Token do agente", token), 0, 1);
+
+        poll.Minimum = 3;
+        poll.Maximum = 300;
+        poll.BorderStyle = BorderStyle.FixedSingle;
+        grid.Controls.Add(Field("Intervalo de consulta (segundos)", poll), 1, 1);
+
+        var folderPanel = new Panel { Dock = DockStyle.Fill };
+        folder.BorderStyle = BorderStyle.FixedSingle;
+        folder.Dock = DockStyle.Fill;
+        var browse = SecondaryButton("Selecionar", 100);
+        browse.Dock = DockStyle.Right;
+        browse.Margin = new Padding(8, 0, 0, 0);
+        browse.Click += (_, __) =>
+        {
+            using var x = new FolderBrowserDialog { SelectedPath = folder.Text };
+            if (x.ShowDialog() == DialogResult.OK) folder.Text = x.SelectedPath;
+        };
+        folderPanel.Controls.Add(folder);
+        folderPanel.Controls.Add(browse);
+        grid.Controls.Add(Field("Pasta de saída", folderPanel), 0, 2);
+        grid.SetColumnSpan(grid.GetControlFromPosition(0, 2), 2);
+
+        card.Controls.Add(grid);
+
+        testMode.Text = "Modo teste — salvar os trabalhos em PDF";
+        autoStart.Text = "Iniciar automaticamente com o Windows";
+        testMode.AutoSize = true;
+        autoStart.AutoSize = true;
+        testMode.ForeColor = Text;
+        autoStart.ForeColor = Text;
+        testMode.Left = 28;
+        testMode.Top = 282;
+        autoStart.Left = 330;
+        autoStart.Top = 282;
+        card.Controls.Add(testMode);
+        card.Controls.Add(autoStart);
+
+        var actions = new FlowLayoutPanel
+        {
+            Left = 24,
+            Top = 315,
+            Width = card.Width - 48,
+            Height = 42,
+            Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        card.Resize += (_, __) => actions.Width = card.Width - 48;
+
+        startStop.Text = "▶  Iniciar agente";
+        startStop.Width = 145;
+        StylePrimary(startStop);
+
+        var save = SecondaryButton("Salvar", 105);
+        var test = SecondaryButton("Testar conexão", 135);
+        var pdf = SecondaryButton("Criar PDF teste", 135);
+        var open = SecondaryButton("Abrir pasta", 115);
+
+        actions.Controls.AddRange([startStop, save, test, pdf, open]);
+        card.Controls.Add(actions);
+
+        save.Click += (_, __) => SaveUi();
+        startStop.Click += (_, __) => Toggle();
+        test.Click += async (_, __) =>
+        {
+            SaveUi();
+            var ok = await svc.TestAsync(cfg);
+            MessageBox.Show(
+                ok ? "Conexão realizada com sucesso." : "A API do Print Agent ainda não respondeu. Isso é esperado até publicarmos as rotas.",
+                "Teste de conexão",
+                MessageBoxButtons.OK,
+                ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning
+            );
+        };
+        pdf.Click += (_, __) =>
+        {
+            SaveUi();
+            var p = svc.CreateTestPdf(cfg);
+            MessageBox.Show("PDF de teste criado em:\n" + p, "Teste concluído", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
+        open.Click += (_, __) =>
+        {
+            SaveUi();
+            Directory.CreateDirectory(cfg.OutputFolder);
+            Process.Start(new ProcessStartInfo("explorer.exe", cfg.OutputFolder) { UseShellExecute = true });
+        };
+
+        return card;
+    }
+
+    Control BuildLogCard()
+    {
+        var card = CardPanel(190);
+        card.Controls.Add(new Label
+        {
+            Text = "Atividade recente",
+            ForeColor = Text,
+            Font = new Font("Segoe UI", 12, FontStyle.Bold),
+            AutoSize = true,
+            Left = 24,
+            Top = 18
+        });
+        card.Controls.Add(new Label
+        {
+            Text = "Eventos do agente, testes e trabalhos recebidos.",
+            ForeColor = Muted,
+            AutoSize = true,
+            Left = 24,
+            Top = 44
+        });
+
+        log.Left = 24;
+        log.Top = 72;
+        log.Width = card.Width - 48;
+        log.Height = 98;
+        log.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+        log.BorderStyle = BorderStyle.None;
+        log.BackColor = Color.FromArgb(248, 250, 248);
+        log.ForeColor = Text;
+        log.Font = new Font("Consolas", 8.7f);
+        card.Controls.Add(log);
+
+        return card;
+    }
+
+    Panel CardPanel(int height)
+    {
+        return new Panel
+        {
+            Height = height,
+            Dock = DockStyle.Top,
+            BackColor = Card,
+            Margin = new Padding(0),
+            Padding = Padding.Empty,
+            BorderStyle = BorderStyle.FixedSingle
+        };
+    }
+
+    Control Field(string title, Control control)
+    {
+        var p = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 0, 16, 8) };
+        var l = new Label
+        {
+            Text = title,
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            AutoSize = true,
+            Left = 0,
+            Top = 0
+        };
+        control.Left = 0;
+        control.Top = 23;
+        control.Height = 30;
+        control.Width = p.Width - 16;
+        control.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+        if (control is TextBox tb) tb.BorderStyle = BorderStyle.FixedSingle;
+        p.Controls.Add(l);
+        p.Controls.Add(control);
+        return p;
+    }
+
+    Button SecondaryButton(string text, int width)
+    {
+        var b = new Button
+        {
+            Text = text,
+            Width = width,
+            Height = 34,
+            BackColor = Color.White,
+            ForeColor = Text,
+            FlatStyle = FlatStyle.Flat,
+            Margin = new Padding(0, 0, 8, 0),
+            Cursor = Cursors.Hand
+        };
+        b.FlatAppearance.BorderColor = Border;
+        b.FlatAppearance.BorderSize = 1;
+        return b;
+    }
+
+    void StylePrimary(Button b)
+    {
+        b.Height = 34;
+        b.BackColor = Green700;
+        b.ForeColor = Color.White;
+        b.FlatStyle = FlatStyle.Flat;
+        b.FlatAppearance.BorderSize = 0;
+        b.Margin = new Padding(0, 0, 8, 0);
+        b.Cursor = Cursors.Hand;
+        b.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+    }
+
+    void UpdateStatus(string value)
+    {
+        statusLabel.Text = value;
+        var ok = value.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase);
+        var waiting = value.Contains("Aguardando", StringComparison.OrdinalIgnoreCase) || value.Contains("Conectando", StringComparison.OrdinalIgnoreCase);
+        statusDot.ForeColor = ok ? Color.FromArgb(52, 168, 98) : waiting ? Gold : Color.FromArgb(173, 179, 175);
+    }
+
+    void LoadUi()
+    {
+        url.Text = cfg.ApiBaseUrl;
+        agentId.Text = cfg.AgentId;
+        token.Text = cfg.AgentToken;
+        poll.Value = Math.Clamp(cfg.PollSeconds, 3, 300);
+        folder.Text = cfg.OutputFolder;
+        autoStart.Checked = cfg.AutoStart;
+        testMode.Checked = cfg.TestMode;
+        UpdateStatus("Parado");
+    }
+
+    void SaveUi()
+    {
+        cfg.ApiBaseUrl = url.Text.Trim();
+        cfg.AgentId = agentId.Text.Trim();
+        cfg.AgentToken = token.Text.Trim();
+        cfg.PollSeconds = (int)poll.Value;
+        cfg.OutputFolder = folder.Text.Trim();
+        cfg.AutoStart = autoStart.Checked;
+        cfg.TestMode = testMode.Checked;
+        ConfigStore.Save(cfg);
+        log.Items.Insert(0, $"{DateTime.Now:dd/MM/yyyy HH:mm:ss}  Configurações salvas.");
+    }
+
+    void Toggle()
+    {
+        SaveUi();
+        if (svc.IsRunning)
+        {
+            svc.Stop();
+            startStop.Text = "▶  Iniciar agente";
+            StylePrimary(startStop);
+        }
+        else
+        {
+            svc.Start(() => cfg);
+            startStop.Text = "■  Parar agente";
+            startStop.BackColor = Color.FromArgb(139, 61, 53);
+        }
+    }
+
+    void Closing(object? sender, FormClosingEventArgs e)
+    {
+        if (!reallyExit)
+        {
+            e.Cancel = true;
+            Hide();
+            tray.ShowBalloonTip(1800, "Marsan Print Agent", "O agente continua executando em segundo plano.", ToolTipIcon.Info);
+        }
+        else
+        {
+            tray.Visible = false;
+            svc.Dispose();
+        }
+    }
 }
