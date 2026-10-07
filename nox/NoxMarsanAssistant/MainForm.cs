@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
 
 namespace NoxMarsanAssistant;
@@ -11,7 +12,7 @@ public sealed class MainForm : Form
     private readonly NotifyIcon tray = new();
 
     private readonly Label agentStatus = new();
-    private readonly Label noxStatus = new();
+    private readonly Label assistantStatus = new();
     private readonly Label voiceStatus = new();
     private readonly TextBox command = new();
     private readonly TextBox output = new();
@@ -24,19 +25,28 @@ public sealed class MainForm : Form
     private readonly CheckBox savePdf = new();
     private readonly NumericUpDown poll = new();
     private readonly Button voiceToggle = new();
+    private readonly Panel contentHost = new();
+    private readonly Dictionary<string, Button> navButtons = new();
+
+    private string currentPage = "assistant";
     private bool reallyExit;
 
-    private static readonly Color Green = Color.FromArgb(20, 72, 51);
-    private static readonly Color Green2 = Color.FromArgb(38, 104, 75);
+    private static readonly Color Bg = Color.FromArgb(241, 245, 242);
+    private static readonly Color Sidebar = Color.FromArgb(15, 39, 30);
+    private static readonly Color SidebarHover = Color.FromArgb(28, 61, 47);
+    private static readonly Color Green = Color.FromArgb(29, 111, 79);
+    private static readonly Color GreenDark = Color.FromArgb(18, 72, 51);
     private static readonly Color Gold = Color.FromArgb(194, 159, 92);
-    private static readonly Color Bg = Color.FromArgb(244, 246, 243);
-    private static readonly Color Muted = Color.FromArgb(100, 112, 105);
+    private static readonly Color Text = Color.FromArgb(28, 35, 31);
+    private static readonly Color Muted = Color.FromArgb(105, 116, 109);
+    private static readonly Color Border = Color.FromArgb(222, 228, 224);
+    private static readonly Color Card = Color.White;
 
     public MainForm()
     {
-        Text = "NOX Marsan Assistant";
-        ClientSize = new Size(980, 650);
-        MinimumSize = new Size(900, 600);
+        Text = "MARSAN Assistant";
+        ClientSize = new Size(1120, 720);
+        MinimumSize = new Size(980, 640);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
@@ -45,6 +55,7 @@ public sealed class MainForm : Form
         BuildUi();
         LoadConfigToUi();
         RefreshPrinters();
+        ShowPage("assistant");
 
         printService.StatusChanged += s => Ui(() =>
         {
@@ -55,19 +66,17 @@ public sealed class MainForm : Form
         voice.StatusChanged += s => Ui(() =>
         {
             voiceStatus.Text = s;
-            noxStatus.Text = s;
+            assistantStatus.Text = s;
         });
 
         voice.ErrorOccurred += s => Ui(() =>
         {
             voiceStatus.Text = "Erro de voz";
+            assistantStatus.Text = "Erro no reconhecimento";
             Log("VOZ", s);
         });
 
-        voice.HeardWhileWaiting += s => Ui(() =>
-        {
-            Log("ESCUTA", $"Ouvi enquanto aguardava NOX: {s}");
-        });
+        voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava MARSAN: {s}"));
 
         voice.CommandRecognized += text => Ui(async () =>
         {
@@ -76,13 +85,12 @@ public sealed class MainForm : Form
         });
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Abrir NOX", null, (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); }));
+        menu.Items.Add("Abrir MARSAN", null, (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); }));
         menu.Items.Add("Ativar/desativar voz", null, (_, _) => Ui(ToggleVoice));
-        menu.Items.Add("Executar comando", null, (_, _) => Ui(() => { Show(); command.Focus(); }));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sair", null, (_, _) => Ui(() => { reallyExit = true; Close(); }));
 
-        tray.Text = "NOX Marsan Assistant";
+        tray.Text = "MARSAN Assistant";
         tray.Icon = SystemIcons.Application;
         tray.Visible = true;
         tray.ContextMenuStrip = menu;
@@ -101,12 +109,6 @@ public sealed class MainForm : Form
     private void Ui(Action action)
     {
         if (IsDisposed || Disposing) return;
-
-        if (!IsHandleCreated)
-        {
-            try { CreateControl(); } catch { return; }
-        }
-
         try
         {
             if (InvokeRequired) BeginInvoke(action);
@@ -117,44 +119,220 @@ public sealed class MainForm : Form
 
     private void BuildUi()
     {
-        var header = new Panel { Dock = DockStyle.Top, Height = 96, BackColor = Green };
-        var logo = new Label { Text = "N", ForeColor = Green, BackColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(24, 22, 52, 52) };
-        var title = new Label { Text = "NOX", ForeColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = true, Left = 92, Top = 18 };
-        var sub = new Label { Text = "Marsan Assistant", ForeColor = Color.FromArgb(205, 224, 213), Font = new Font("Segoe UI", 11), AutoSize = true, Left = 95, Top = 56 };
-        var badge = new Label { Text = "v0.3.3", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
-        header.Controls.AddRange(new Control[] { logo, title, sub, badge });
-        Controls.Add(header);
+        var sidebar = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = 230,
+            BackColor = Sidebar,
+            Padding = new Padding(18, 18, 18, 18)
+        };
 
-        var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 8) };
-        tabs.TabPages.Add(BuildAssistantTab());
-        tabs.TabPages.Add(BuildPrintTab());
-        tabs.TabPages.Add(BuildSettingsTab());
-        Controls.Add(tabs);
-        tabs.BringToFront();
+        var brand = new Panel { Dock = DockStyle.Top, Height = 110, BackColor = Sidebar };
+        var logo = new RoundedPanel { Left = 0, Top = 5, Width = 54, Height = 54, BackColor = Green, Radius = 16 };
+        logo.Controls.Add(new Label
+        {
+            Text = "M",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 22, FontStyle.Bold)
+        });
+
+        brand.Controls.AddRange(new Control[]
+        {
+            logo,
+            new Label { Text = "MARSAN", Left = 68, Top = 8, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 18, FontStyle.Bold) },
+            new Label { Text = "ASSISTANT", Left = 70, Top = 43, AutoSize = true, ForeColor = Color.FromArgb(149, 181, 165), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) }
+        });
+
+        var nav = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 250,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            BackColor = Sidebar,
+            Padding = new Padding(0, 12, 0, 0)
+        };
+
+        nav.Controls.Add(CreateNavButton("assistant", "✦   Assistente"));
+        nav.Controls.Add(CreateNavButton("print", "▣   Impressão"));
+        nav.Controls.Add(CreateNavButton("settings", "⚙   Configurações"));
+
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 74, BackColor = Sidebar };
+        footer.Controls.AddRange(new Control[]
+        {
+            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
+            new Label { Text = "v0.4.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+        });
+
+        sidebar.Controls.Add(footer);
+        sidebar.Controls.Add(nav);
+        sidebar.Controls.Add(brand);
+
+        var topbar = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 72,
+            BackColor = Card,
+            Padding = new Padding(28, 0, 28, 0)
+        };
+        topbar.Paint += (_, e) =>
+        {
+            using var p = new Pen(Border);
+            e.Graphics.DrawLine(p, 0, topbar.Height - 1, topbar.Width, topbar.Height - 1);
+        };
+
+        var pageTitle = new Label
+        {
+            Name = "pageTitle",
+            Text = "Assistente",
+            AutoSize = true,
+            ForeColor = Text,
+            Font = new Font("Segoe UI Semibold", 15, FontStyle.Bold),
+            Left = 28,
+            Top = 22
+        };
+
+        var system = new Label
+        {
+            Text = "●  Sistema ativo",
+            AutoSize = true,
+            ForeColor = Green,
+            Font = new Font("Segoe UI Semibold", 9),
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            Left = 735,
+            Top = 26
+        };
+
+        topbar.Controls.AddRange(new Control[] { pageTitle, system });
+
+        contentHost.Dock = DockStyle.Fill;
+        contentHost.BackColor = Bg;
+        contentHost.Padding = new Padding(28);
+
+        Controls.Add(contentHost);
+        Controls.Add(topbar);
+        Controls.Add(sidebar);
     }
 
-    private TabPage BuildAssistantTab()
+    private Button CreateNavButton(string key, string text)
     {
-        var page = new TabPage("Assistente") { BackColor = Bg, Padding = new Padding(24) };
+        var b = new Button
+        {
+            Text = text,
+            Width = 194,
+            Height = 48,
+            Margin = new Padding(0, 0, 0, 8),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Sidebar,
+            ForeColor = Color.FromArgb(205, 220, 212),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Font = new Font("Segoe UI Semibold", 10.2f),
+            Padding = new Padding(14, 0, 0, 0),
+            Cursor = Cursors.Hand
+        };
+        b.FlatAppearance.BorderSize = 0;
+        b.MouseEnter += (_, _) => { if (currentPage != key) b.BackColor = SidebarHover; };
+        b.MouseLeave += (_, _) => { if (currentPage != key) b.BackColor = Sidebar; };
+        b.Click += (_, _) => ShowPage(key);
+        navButtons[key] = b;
+        return b;
+    }
 
-        var headline = new Label { Text = "Fale com o NOX", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = Green, AutoSize = true, Left = 24, Top = 24 };
-        var hint = new Label { Text = "Diga “NOX”, aguarde o bip e fale o comando. Você também pode digitar abaixo.", ForeColor = Muted, AutoSize = true, Left = 27, Top = 66 };
+    private void ShowPage(string page)
+    {
+        currentPage = page;
+        foreach (var kv in navButtons)
+        {
+            kv.Value.BackColor = kv.Key == page ? Green : Sidebar;
+            kv.Value.ForeColor = kv.Key == page ? Color.White : Color.FromArgb(205, 220, 212);
+        }
 
-        voiceToggle.Text = "🎤 Ativar voz";
-        voiceToggle.BackColor = Green2;
-        voiceToggle.ForeColor = Color.White;
-        voiceToggle.FlatStyle = FlatStyle.Flat;
-        voiceToggle.FlatAppearance.BorderSize = 0;
-        voiceToggle.SetBounds(27, 100, 150, 40);
+        contentHost.Controls.Clear();
+        Control body = page switch
+        {
+            "print" => BuildPrintPage(),
+            "settings" => BuildSettingsPage(),
+            _ => BuildAssistantPage()
+        };
+        body.Dock = DockStyle.Fill;
+        contentHost.Controls.Add(body);
+
+        var title = Controls.Find("pageTitle", true).FirstOrDefault() as Label;
+        if (title is not null)
+            title.Text = page switch
+            {
+                "print" => "Central de impressão",
+                "settings" => "Configurações",
+                _ => "Assistente"
+            };
+    }
+
+    private Control BuildAssistantPage()
+    {
+        var root = new Panel { BackColor = Bg };
+
+        var hero = new RoundedPanel { Left = 0, Top = 0, Width = 820, Height = 185, BackColor = Sidebar, Radius = 22 };
+        hero.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+
+        hero.Controls.Add(new Label
+        {
+            Text = "MARSAN Assistant",
+            Left = 28,
+            Top = 25,
+            AutoSize = true,
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold)
+        });
+        hero.Controls.Add(new Label
+        {
+            Text = "Assistente local para impressão e automações da Marsan Madeiras.",
+            Left = 30,
+            Top = 68,
+            AutoSize = true,
+            ForeColor = Color.FromArgb(190, 211, 200),
+            Font = new Font("Segoe UI", 10.5f)
+        });
+
+        assistantStatus.Text = "Pronto para receber comandos";
+        assistantStatus.Left = 50;
+        assistantStatus.Top = 116;
+        assistantStatus.AutoSize = true;
+        assistantStatus.ForeColor = Color.FromArgb(213, 231, 222);
+        assistantStatus.Font = new Font("Segoe UI Semibold", 10);
+
+        hero.Controls.Add(new Label
+        {
+            Text = "●",
+            Left = 28,
+            Top = 111,
+            AutoSize = true,
+            ForeColor = Color.FromArgb(73, 211, 136),
+            Font = new Font("Segoe UI", 12, FontStyle.Bold)
+        });
+
+        voiceToggle.Text = "Ativar voz";
+        voiceToggle.Width = 145;
+        voiceToggle.Height = 40;
+        voiceToggle.Left = 645;
+        voiceToggle.Top = 111;
+        voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        StylePrimaryButton(voiceToggle);
         voiceToggle.Click += (_, _) => ToggleVoice();
 
-        voiceStatus.Text = "Voz desativada";
-        voiceStatus.ForeColor = Muted;
-        voiceStatus.SetBounds(195, 110, 500, 26);
+        hero.Controls.AddRange(new Control[] { assistantStatus, voiceToggle });
 
-        command.SetBounds(27, 160, 720, 38);
-        command.Font = new Font("Segoe UI", 12);
-        command.PlaceholderText = "Digite um comando para o NOX...";
+        var cmdCard = new RoundedPanel { Left = 0, Top = 205, Width = 820, Height = 145, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+        cmdCard.Controls.Add(new Label { Text = "Comando", Left = 24, Top = 19, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+
+        command.Left = 24;
+        command.Top = 55;
+        command.Width = 630;
+        command.Height = 36;
+        command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        command.Font = new Font("Segoe UI", 11);
+        command.PlaceholderText = "Ex.: imprima Santa Clara";
         command.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -164,112 +342,159 @@ public sealed class MainForm : Form
             }
         };
 
-        var run = new Button { Text = "Executar", BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Left = 760, Top = 158, Width = 140, Height = 40 };
-        run.FlatAppearance.BorderSize = 0;
+        var run = new Button { Text = "Executar", Left = 670, Top = 54, Width = 120, Height = 38, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        StylePrimaryButton(run);
         run.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
 
-        noxStatus.Text = "Pronto";
-        noxStatus.ForeColor = Green2;
-        noxStatus.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-        noxStatus.SetBounds(27, 215, 800, 26);
+        cmdCard.Controls.AddRange(new Control[] { command, run });
 
+        var logCard = new RoundedPanel { Left = 0, Top = 370, Width = 820, Height = 265, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+        logCard.Controls.Add(new Label { Text = "Atividade recente", Left = 24, Top = 18, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+
+        output.Left = 24;
+        output.Top = 52;
+        output.Width = 772;
+        output.Height = 185;
+        output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         output.Multiline = true;
         output.ReadOnly = true;
         output.ScrollBars = ScrollBars.Vertical;
-        output.BackColor = Color.White;
-        output.BorderStyle = BorderStyle.FixedSingle;
-        output.SetBounds(27, 250, 873, 255);
+        output.BorderStyle = BorderStyle.None;
+        output.BackColor = Color.FromArgb(248, 250, 249);
+        output.ForeColor = Text;
+        output.Font = new Font("Consolas", 9.2f);
 
-        page.Controls.AddRange(new Control[] { headline, hint, voiceToggle, voiceStatus, command, run, noxStatus, output });
-        return page;
+        logCard.Controls.Add(output);
+        root.Controls.AddRange(new Control[] { hero, cmdCard, logCard });
+        return root;
     }
 
-    private TabPage BuildPrintTab()
+    private Control BuildPrintPage()
     {
-        var page = new TabPage("Impressão") { BackColor = Bg, Padding = new Padding(24) };
-        var title = new Label { Text = "Central de impressão", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = Green, AutoSize = true, Left = 24, Top = 24 };
+        var root = new Panel { BackColor = Bg };
 
-        var statusTitle = new Label { Text = "STATUS DO AGENTE", ForeColor = Muted, Font = new Font("Segoe UI", 8, FontStyle.Bold), AutoSize = true, Left = 28, Top = 82 };
+        var statusCard = CreateCard("Status do agente", 0, 0, 390, 165);
         agentStatus.Text = "Parado";
-        agentStatus.ForeColor = Green2;
-        agentStatus.Font = new Font("Segoe UI", 12, FontStyle.Bold);
-        agentStatus.SetBounds(28, 105, 600, 30);
+        agentStatus.Left = 24;
+        agentStatus.Top = 55;
+        agentStatus.Width = 330;
+        agentStatus.Height = 34;
+        agentStatus.Font = new Font("Segoe UI Semibold", 17, FontStyle.Bold);
+        agentStatus.ForeColor = Green;
+        statusCard.Controls.Add(agentStatus);
+        statusCard.Controls.Add(new Label { Text = "Processamento de trabalhos de impressão", Left = 24, Top = 100, AutoSize = true, ForeColor = Muted });
 
-        var printerLabel = new Label { Text = "Impressora", Left = 28, Top = 165, Width = 160 };
-        printers.SetBounds(28, 190, 520, 32);
-        printers.DropDownStyle = ComboBoxStyle.DropDownList;
-
+        var outputCard = CreateCard("Modo de saída", 410, 0, 390, 165);
         savePdf.Text = "Salvar PDF em vez de imprimir";
-        savePdf.SetBounds(28, 240, 300, 28);
+        savePdf.Left = 24;
+        savePdf.Top = 62;
+        savePdf.Width = 300;
+        savePdf.Height = 28;
+        outputCard.Controls.Add(savePdf);
 
-        var start = new Button { Text = "Iniciar agente", Left = 28, Top = 300, Width = 160, Height = 40, BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        start.FlatAppearance.BorderSize = 0;
+        var printerCard = CreateCard("Impressora padrão", 0, 185, 800, 140);
+        printers.Left = 24;
+        printers.Top = 58;
+        printers.Width = 748;
+        printers.Height = 32;
+        printers.DropDownStyle = ComboBoxStyle.DropDownList;
+        printerCard.Controls.Add(printers);
+
+        var actions = CreateCard("Ações", 0, 345, 800, 145);
+        var start = MakeActionButton("Iniciar agente", 24, 58, true);
         start.Click += (_, _) => { SaveUi(); printService.Start(() => cfg); };
-
-        var stop = new Button { Text = "Parar", Left = 200, Top = 300, Width = 120, Height = 40 };
+        var stop = MakeActionButton("Parar", 190, 58, false);
         stop.Click += (_, _) => printService.Stop();
-
-        var test = new Button { Text = "Testar conexão", Left = 332, Top = 300, Width = 160, Height = 40 };
+        var test = MakeActionButton("Testar conexão", 316, 58, false);
         test.Click += async (_, _) =>
         {
             SaveUi();
             agentStatus.Text = await printService.TestAsync(cfg) ? "Conexão OK" : "Falha na conexão";
         };
-
-        var folder = new Button { Text = "Abrir impressos", Left = 504, Top = 300, Width = 160, Height = 40 };
+        var folder = MakeActionButton("Abrir impressos", 482, 58, false);
         folder.Click += (_, _) =>
         {
             Directory.CreateDirectory(cfg.OutputFolder);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = cfg.OutputFolder, UseShellExecute = true });
         };
 
-        page.Controls.AddRange(new Control[] { title, statusTitle, agentStatus, printerLabel, printers, savePdf, start, stop, test, folder });
-        return page;
+        actions.Controls.AddRange(new Control[] { start, stop, test, folder });
+        root.Controls.AddRange(new Control[] { statusCard, outputCard, printerCard, actions });
+        return root;
     }
 
-    private TabPage BuildSettingsTab()
+    private Control BuildSettingsPage()
     {
-        var page = new TabPage("Configurações") { BackColor = Bg, Padding = new Padding(24) };
-        var title = new Label { Text = "Configurações do NOX", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = Green, AutoSize = true, Left = 24, Top = 24 };
+        var root = new Panel { BackColor = Bg };
 
-        page.Controls.Add(title);
-        AddLabeled(page, "Token do Print Agent", agentToken, 28, 82, true);
-        AddLabeled(page, "Chave da API Marsan Consulta", consultaKey, 28, 150, true);
+        var integrations = CreateCard("Integrações", 0, 0, 800, 220);
+        AddLabeled(integrations, "Token do Print Agent", agentToken, 24, 52, true, 748);
+        AddLabeled(integrations, "Chave da API Marsan Consulta", consultaKey, 24, 122, true, 748);
 
-        var pollLabel = new Label { Text = "Intervalo de consulta (segundos)", Left = 28, Top = 225, Width = 240 };
-        poll.SetBounds(28, 250, 120, 30);
-        poll.Minimum = 3; poll.Maximum = 300;
+        var behavior = CreateCard("Comportamento", 0, 240, 800, 220);
+        behavior.Controls.Add(new Label { Text = "Intervalo de consulta", Left = 24, Top = 54, Width = 180, ForeColor = Text });
+        poll.Left = 210;
+        poll.Top = 48;
+        poll.Width = 95;
+        poll.Minimum = 3;
+        poll.Maximum = 300;
+        behavior.Controls.Add(poll);
+        behavior.Controls.Add(new Label { Text = "segundos", Left = 314, Top = 55, Width = 80, ForeColor = Muted });
 
-        autoStart.Text = "Iniciar NOX com o Windows";
-        autoStart.SetBounds(28, 305, 280, 28);
-
-        autoListen.Text = "Ativar escuta por “NOX” ao iniciar";
-        autoListen.SetBounds(28, 340, 320, 28);
-
+        autoStart.Text = "Iniciar MARSAN com o Windows";
+        autoStart.SetBounds(24, 98, 300, 28);
+        autoListen.Text = "Ativar escuta ao iniciar";
+        autoListen.SetBounds(24, 132, 300, 28);
         voiceResponses.Text = "Responder por voz";
-        voiceResponses.SetBounds(28, 375, 280, 28);
+        voiceResponses.SetBounds(24, 166, 300, 28);
 
-        var save = new Button { Text = "Salvar configurações", Left = 28, Top = 425, Width = 200, Height = 42, BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        save.FlatAppearance.BorderSize = 0;
-        save.Click += (_, _) => { SaveUi(); MessageBox.Show("Configurações salvas.", "NOX"); };
+        behavior.Controls.AddRange(new Control[] { autoStart, autoListen, voiceResponses });
 
-        var note = new Label
-        {
-            Text = "O reconhecimento agora é offline e independente do reconhecimento de voz do Windows.\nNa primeira ativação, o NOX baixa automaticamente o modelo PT-BR (~31 MB).",
-            ForeColor = Muted, AutoSize = true, Left = 28, Top = 490
-        };
+        var save = new Button { Text = "Salvar configurações", Left = 0, Top = 485, Width = 190, Height = 42 };
+        StylePrimaryButton(save);
+        save.Click += (_, _) => { SaveUi(); MessageBox.Show("Configurações salvas.", "MARSAN Assistant"); };
 
-        page.Controls.AddRange(new Control[] { pollLabel, poll, autoStart, autoListen, voiceResponses, save, note });
-        return page;
+        root.Controls.AddRange(new Control[] { integrations, behavior, save });
+        return root;
     }
 
-    private static void AddLabeled(Control parent, string labelText, TextBox box, int x, int y, bool password)
+    private RoundedPanel CreateCard(string title, int x, int y, int w, int h)
     {
-        var label = new Label { Text = labelText, Left = x, Top = y, Width = 320 };
-        box.SetBounds(x, y + 24, 620, 30);
+        var p = new RoundedPanel { Left = x, Top = y, Width = w, Height = h, BackColor = Card, Radius = 18 };
+        p.Controls.Add(new Label { Text = title, Left = 24, Top = 20, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+        return p;
+    }
+
+    private static void AddLabeled(Control parent, string label, TextBox box, int x, int y, bool password, int width)
+    {
+        parent.Controls.Add(new Label { Text = label, Left = x, Top = y, Width = 320, ForeColor = Muted, Font = new Font("Segoe UI", 9) });
+        box.SetBounds(x, y + 22, width, 32);
         box.UseSystemPasswordChar = password;
-        parent.Controls.Add(label);
         parent.Controls.Add(box);
+    }
+
+    private Button MakeActionButton(string text, int x, int y, bool primary)
+    {
+        var b = new Button { Text = text, Left = x, Top = y, Width = 150, Height = 38, Cursor = Cursors.Hand };
+        if (primary) StylePrimaryButton(b);
+        else
+        {
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderColor = Border;
+            b.BackColor = Color.White;
+            b.ForeColor = Text;
+        }
+        return b;
+    }
+
+    private static void StylePrimaryButton(Button b)
+    {
+        b.FlatStyle = FlatStyle.Flat;
+        b.FlatAppearance.BorderSize = 0;
+        b.BackColor = Green;
+        b.ForeColor = Color.White;
+        b.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+        b.Cursor = Cursors.Hand;
     }
 
     private async void ToggleVoice()
@@ -287,23 +512,23 @@ public sealed class MainForm : Form
 
         if (voice.IsRunning)
         {
-            voiceToggle.Text = "⏹ Desativar voz";
-            voiceStatus.Text = "Aguardando “NOX”...";
-            Log("VOZ", string.IsNullOrWhiteSpace(voice.RecognizerName)
-                ? "Escuta ativada."
-                : $"Escuta ativada com {voice.RecognizerName}.");
+            voiceToggle.Text = "Desativar voz";
+            voiceStatus.Text = "Aguardando “MARSAN”...";
+            assistantStatus.Text = "Aguardando “MARSAN”...";
+            Log("VOZ", $"Escuta ativada com {voice.RecognizerName}.");
         }
         else
         {
-            voiceToggle.Text = "🎤 Ativar voz";
+            voiceToggle.Text = "Ativar voz";
         }
     }
 
     private void StopVoice()
     {
         voice.Stop();
-        voiceToggle.Text = "🎤 Ativar voz";
+        voiceToggle.Text = "Ativar voz";
         voiceStatus.Text = "Voz desativada";
+        assistantStatus.Text = "Voz desativada";
     }
 
     private async Task ExecuteCommandTextAsync(string text, bool fromVoice)
@@ -312,14 +537,14 @@ public sealed class MainForm : Form
         if (text.Length == 0) return;
 
         SaveUi();
-        noxStatus.Text = "Pensando...";
-        Log(fromVoice ? "VOCÊ 🎤" : "VOCÊ", text);
+        assistantStatus.Text = "Processando comando...";
+        Log(fromVoice ? "VOCÊ • VOZ" : "VOCÊ", text);
 
         try
         {
             var result = await nox.ExecuteAsync(text, cfg, CancellationToken.None);
-            noxStatus.Text = result.Success ? "Concluído" : "Não entendi";
-            Log("NOX", result.Message);
+            assistantStatus.Text = result.Success ? "Comando concluído" : "Não entendi o comando";
+            Log("MARSAN", result.Message);
 
             if (cfg.VoiceResponses && fromVoice)
                 voice.Speak(result.Message);
@@ -328,17 +553,14 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            noxStatus.Text = "Erro";
+            assistantStatus.Text = "Erro ao executar";
             Log("ERRO", ex.Message);
             if (cfg.VoiceResponses && fromVoice)
                 voice.Speak("Ocorreu um erro ao executar o comando.");
         }
     }
 
-    private void Log(string who, string text)
-    {
-        output.AppendText($"[{DateTime.Now:HH:mm:ss}] {who}: {text}{Environment.NewLine}");
-    }
+    private void Log(string who, string text) => output.AppendText($"[{DateTime.Now:HH:mm:ss}] {who}: {text}{Environment.NewLine}");
 
     private void RefreshPrinters()
     {
@@ -381,8 +603,8 @@ public sealed class MainForm : Form
         {
             e.Cancel = true;
             Hide();
-            tray.ShowBalloonTip(1500, "NOX", voice.IsRunning
-                ? "Continuo ativo e aguardando a palavra NOX."
+            tray.ShowBalloonTip(1500, "MARSAN", voice.IsRunning
+                ? "Continuo ativo e aguardando a palavra MARSAN."
                 : "Continuo ativo na bandeja do Windows.", ToolTipIcon.Info);
             return;
         }
@@ -390,5 +612,32 @@ public sealed class MainForm : Form
         tray.Visible = false;
         voice.Dispose();
         printService.Dispose();
+    }
+}
+
+public sealed class RoundedPanel : Panel
+{
+    public int Radius { get; set; } = 16;
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        using var path = RoundedRect(ClientRectangle, Radius);
+        Region = new Region(path);
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var pen = new Pen(Color.FromArgb(226, 231, 228));
+        e.Graphics.DrawPath(pen, path);
+    }
+
+    private static GraphicsPath RoundedRect(Rectangle r, int radius)
+    {
+        var d = radius * 2;
+        var path = new GraphicsPath();
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d - 1, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d - 1, r.Bottom - d - 1, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d - 1, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 }
