@@ -314,7 +314,26 @@ public sealed class VoiceService : IDisposable
 
         if (model is null) return;
 
-        recognizer = new VoskRecognizer(model, 16000.0f);
+        if (wakeOnly)
+        {
+            // Em modo de espera limitamos o vocabulário para aumentar muito a chance
+            // de reconhecer palavras curtas/nome próprio como MARSAN e NOX.
+            var grammar = JsonSerializer.Serialize(new[]
+            {
+                "marsan", "marsam", "mar san", "marcam", "marcan",
+                "marçal", "marcao", "marção", "marsa", "marson",
+                "maçã", "maca", "massan",
+                "nox", "nocs", "nocks", "noques", "nos", "noz", "nós", "nois",
+                "[unk]"
+            });
+
+            recognizer = new VoskRecognizer(model, 16000.0f, grammar);
+        }
+        else
+        {
+            recognizer = new VoskRecognizer(model, 16000.0f);
+        }
+
         recognizer.SetWords(true);
     }
 
@@ -361,6 +380,11 @@ public sealed class VoiceService : IDisposable
                 return token;
         }
 
+        // Algumas variantes retornam separadas em duas palavras, como "mar san".
+        var compact = value.Replace(" ", "");
+        if (IsWakeToken(compact))
+            return value;
+
         return null;
     }
 
@@ -373,7 +397,7 @@ public sealed class VoiceService : IDisposable
             // MARSAN / "marçam"
             "marsan", "marsam", "marcan", "marcam", "marssan", "massan",
             "marsa", "marson", "marsem", "marsen", "marcal", "marcao",
-            "macao", "maca",
+            "marcao", "marcao", "macao", "maca", "macan", "masan",
 
             // Compatibilidade com a wake word antiga NOX
             "nox", "nocs", "nocks", "noques", "noz", "nos", "nois", "noxx"
