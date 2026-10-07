@@ -83,7 +83,7 @@ public sealed class MainForm : Form
             Log("VOZ", s);
         });
 
-        voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava MARSAN: {s}"));
+        voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava MS: {s}"));
         voice.DiagnosticLog += s => Ui(() => Log("VOICE", s));
 
         voice.CommandRecognized += text => Ui(async () =>
@@ -187,7 +187,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.6.2", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "v0.6.3", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
         });
 
         sidebar.Controls.Add(footer);
