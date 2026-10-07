@@ -26,11 +26,14 @@ public sealed class VoiceService : IDisposable
     private DateTime commandStartedAt = DateTime.MinValue;
     private string lastWaitingTranscript = "";
     private DateTime lastWaitingLogAt = DateTime.MinValue;
+    private bool trainingMode;
+    private DateTime trainingStartedAt = DateTime.MinValue;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
     public event Action<string>? ErrorOccurred;
     public event Action<string>? HeardWhileWaiting;
+    public event Action<string>? TrainingSampleRecognized;
 
     public bool IsRunning => running;
     public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
@@ -134,6 +137,35 @@ public sealed class VoiceService : IDisposable
         StatusChanged?.Invoke("Voz desativada");
     }
 
+    public void BeginTrainingSample()
+    {
+        if (!running)
+        {
+            ErrorOccurred?.Invoke("Ative a voz antes de gravar uma amostra.");
+            return;
+        }
+
+        lock (sync)
+        {
+            trainingMode = true;
+            commandMode = false;
+            trainingStartedAt = DateTime.Now;
+            ResetRecognizer(wakeOnly: false);
+            SystemSounds.Asterisk.Play();
+            StatusChanged?.Invoke("Treinamento • fale o nome agora...");
+        }
+    }
+
+    public void CancelTrainingSample()
+    {
+        lock (sync)
+        {
+            trainingMode = false;
+            ResetRecognizer(wakeOnly: true);
+            StatusChanged?.Invoke("Treinamento cancelado.");
+        }
+    }
+
     public void Speak(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
@@ -235,7 +267,13 @@ public sealed class VoiceService : IDisposable
                         HandleRecognizedText(partial, isPartial: true);
                 }
 
-                if (commandMode && DateTime.Now - commandStartedAt > TimeSpan.FromSeconds(9))
+                if (trainingMode && DateTime.Now - trainingStartedAt > TimeSpan.FromSeconds(8))
+                {
+                    trainingMode = false;
+                    ResetRecognizer(wakeOnly: true);
+                    StatusChanged?.Invoke("Treinamento • tempo esgotado.");
+                }
+                else if (commandMode && DateTime.Now - commandStartedAt > TimeSpan.FromSeconds(9))
                 {
                     commandMode = false;
                     ResetRecognizer(wakeOnly: true);
@@ -251,6 +289,20 @@ public sealed class VoiceService : IDisposable
 
     private void HandleRecognizedText(string text, bool isPartial)
     {
+        if (trainingMode)
+        {
+            if (isPartial) return;
+
+            var sample = text.Trim();
+            if (string.IsNullOrWhiteSpace(sample)) return;
+
+            trainingMode = false;
+            ResetRecognizer(wakeOnly: true);
+            StatusChanged?.Invoke($"Treinamento • ouvi: {sample}");
+            TrainingSampleRecognized?.Invoke(sample);
+            return;
+        }
+
         var normalized = Normalize(text);
 
         if (!commandMode)
