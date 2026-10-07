@@ -55,7 +55,7 @@ Expect("imprima guze", MarsanIntent.Print, "GUSE", true);
 Expect("imprima gelensqui", MarsanIntent.Print, "GELENSKI", true);
 Expect("abra Santa Clara", MarsanIntent.Open, "SANTA CLARA", true);
 
-Expect("imprima santa", MarsanIntent.Print, "SANTA CLARA", false, true);
+Expect("imprima santa", MarsanIntent.Print, "SANTA CLARA", false, false);
 Expect("imprima documento inexistente", MarsanIntent.Print, null, false);
 Expect("imprima", MarsanIntent.Print, null, false);
 Expect("quero falar com o financeiro", MarsanIntent.Open, null, false);
