@@ -70,16 +70,53 @@ public sealed class NoxCommandService
             cfg.VoiceRecognition ?? new VoiceRecognitionSettings(),
             wakeRequired: false);
 
-        if (interpretation.ShouldExecute && interpretation.Entity is not null)
+        // Recuperação contextual para comandos de voz:
+        // após o usuário ativar o MS, o Whisper às vezes perde apenas o verbo
+        // ("imprima") e preserva perfeitamente o documento ("gelenski").
+        // Nesse caso, se a entidade estiver muito clara e for imprimível,
+        // assumimos PRINT em vez de descartar uma identificação excelente.
+        var recoveredPrint = false;
+        if (interpretation.Intent == MarsanIntent.Unknown &&
+            interpretation.Entity is not null &&
+            interpretation.Entity.Printable &&
+            interpretation.EntityScore is not null &&
+            interpretation.EntityScore.FinalScore >= 0.88 &&
+            (interpretation.SecondEntityScore is null ||
+             interpretation.EntityScore.FinalScore - interpretation.SecondEntityScore.FinalScore >= 0.20))
         {
-            if (interpretation.Intent == MarsanIntent.Print)
-                return await ExecutePrintAsync(interpretation.Entity, ExtractCopies(command), data.RootElement, cfg, ct, interpretation.Diagnostics);
+            recoveredPrint = true;
+        }
+
+        // Também aceitamos uma impressão quando o verbo foi reconhecido e a
+        // entidade ficou moderadamente deformada, desde que exista uma margem
+        // grande para o segundo candidato. Isso resolve casos como
+        // "m s em prima e geleski" sem liberar nomes ambíguos.
+        var confidentPrint = interpretation.Intent == MarsanIntent.Print &&
+                             interpretation.IntentScore >= 0.80 &&
+                             interpretation.Entity is not null &&
+                             interpretation.Entity.Printable &&
+                             interpretation.EntityScore is not null &&
+                             interpretation.EntityScore.FinalScore >= 0.72 &&
+                             (interpretation.SecondEntityScore is null ||
+                              interpretation.EntityScore.FinalScore - interpretation.SecondEntityScore.FinalScore >= 0.20);
+
+        if ((interpretation.ShouldExecute || recoveredPrint || confidentPrint) &&
+            interpretation.Entity is not null)
+        {
+            var diagnostics = interpretation.Diagnostics.ToList();
+            if (recoveredPrint)
+                diagnostics.Add("[RECOVERY] Verbo ausente; PRINT assumido por entidade >= 88% e margem >= 20%.");
+            else if (confidentPrint && !interpretation.ShouldExecute)
+                diagnostics.Add("[RECOVERY] PRINT liberado por entidade >= 72% com margem >= 20%.");
+
+            if (interpretation.Intent == MarsanIntent.Print || recoveredPrint || confidentPrint)
+                return await ExecutePrintAsync(interpretation.Entity, ExtractCopies(command), data.RootElement, cfg, ct, diagnostics);
 
             if (interpretation.Intent == MarsanIntent.Open)
                 return new(false,
                     $"Entendi que você quer abrir {interpretation.Entity.DisplayName}, mas a abertura visual ainda não está ligada a uma ação nesta versão.",
                     false,
-                    interpretation.Diagnostics);
+                    diagnostics);
         }
 
         if (interpretation.RequiresConfirmation && interpretation.Entity is not null)
