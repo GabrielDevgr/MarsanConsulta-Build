@@ -1,60 +1,60 @@
-using System.Globalization;
-using System.Speech.Recognition;
-using System.Speech.Synthesis;
+using System.IO.Compression;
 using System.Media;
+using System.Speech.Synthesis;
+using System.Text.Json;
+using NAudio.Wave;
+using Vosk;
 
 namespace NoxMarsanAssistant;
 
 public sealed class VoiceService : IDisposable
 {
-    private SpeechRecognitionEngine? recognizer;
+    private const string ModelFolderName = "vosk-model-small-pt-0.3";
+    private const string ModelZipUrl = "https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip";
+
+    private readonly object sync = new();
+    private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(10) };
+
+    private WaveInEvent? waveIn;
+    private Model? model;
+    private VoskRecognizer? recognizer;
     private SpeechSynthesizer? synthesizer;
-    private bool waitingForCommand;
+
     private bool running;
+    private bool commandMode;
+    private DateTime commandStartedAt = DateTime.MinValue;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
     public event Action<string>? ErrorOccurred;
 
     public bool IsRunning => running;
-    public string RecognizerName { get; private set; } = "";
+    public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
 
-    public bool Initialize()
+    private static string BaseFolder =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "NOX Marsan Assistant");
+
+    private static string ModelPath => Path.Combine(BaseFolder, "models", ModelFolderName);
+
+    public async Task<bool> InitializeAsync(CancellationToken ct = default)
     {
         try
         {
+            Directory.CreateDirectory(Path.Combine(BaseFolder, "models"));
+
+            if (!Directory.Exists(ModelPath) || !File.Exists(Path.Combine(ModelPath, "am", "final.mdl")))
+                await DownloadModelAsync(ct);
+
+            Vosk.Vosk.SetLogLevel(-1);
+
+            model?.Dispose();
+            model = new Model(ModelPath);
+
+            ResetRecognizer(wakeOnly: true);
+
             synthesizer ??= CreateSynthesizerSafe();
-
-            var installed = SpeechRecognitionEngine.InstalledRecognizers().ToList();
-            if (installed.Count == 0)
-                throw new InvalidOperationException("Nenhum reconhecedor de voz do Windows está instalado.");
-
-            var pt = installed.FirstOrDefault(x =>
-                x.Culture.Name.Equals("pt-BR", StringComparison.OrdinalIgnoreCase) ||
-                x.Culture.TwoLetterISOLanguageName.Equals("pt", StringComparison.OrdinalIgnoreCase));
-
-            var selected = pt ?? installed.First();
-            recognizer = new SpeechRecognitionEngine(selected);
-            RecognizerName = $"{selected.Description} ({selected.Culture.Name})";
-
-            recognizer.SetInputToDefaultAudioDevice();
-            recognizer.SpeechRecognized += OnSpeechRecognized;
-            recognizer.RecognizeCompleted += (_, _) =>
-            {
-                if (running)
-                    StartWakeRecognition();
-            };
-            recognizer.SpeechRecognitionRejected += (_, _) =>
-            {
-                if (waitingForCommand)
-                {
-                    waitingForCommand = false;
-                    StatusChanged?.Invoke("Não entendi. Diga “NOX” para tentar novamente.");
-                    StartWakeRecognition();
-                }
-            };
-
             TrySelectPortugueseVoice();
+
             return true;
         }
         catch (Exception ex)
@@ -64,15 +64,38 @@ public sealed class VoiceService : IDisposable
         }
     }
 
-    public void Start()
+    public async Task StartAsync(CancellationToken ct = default)
     {
+        if (running) return;
+
         try
         {
-            if (recognizer is null && !Initialize()) return;
-            if (running) return;
+            StatusChanged?.Invoke("Preparando reconhecimento offline...");
+
+            if (model is null && !await InitializeAsync(ct))
+                return;
+
+            waveIn?.Dispose();
+            waveIn = new WaveInEvent
+            {
+                WaveFormat = new WaveFormat(16000, 16, 1),
+                BufferMilliseconds = 100,
+                NumberOfBuffers = 3
+            };
+
+            waveIn.DataAvailable += OnDataAvailable;
+            waveIn.RecordingStopped += (_, e) =>
+            {
+                if (e.Exception is not null)
+                    ErrorOccurred?.Invoke("Microfone: " + e.Exception.Message);
+            };
+
             running = true;
-            waitingForCommand = false;
-            StartWakeRecognition();
+            commandMode = false;
+            ResetRecognizer(wakeOnly: true);
+
+            waveIn.StartRecording();
+            StatusChanged?.Invoke("Aguardando “NOX”...");
         }
         catch (Exception ex)
         {
@@ -84,22 +107,217 @@ public sealed class VoiceService : IDisposable
     public void Stop()
     {
         running = false;
-        waitingForCommand = false;
-        try { recognizer?.RecognizeAsyncCancel(); } catch { }
+        commandMode = false;
+
+        try { waveIn?.StopRecording(); } catch { }
+        try
+        {
+            if (waveIn is not null)
+                waveIn.DataAvailable -= OnDataAvailable;
+            waveIn?.Dispose();
+        }
+        catch { }
+
+        waveIn = null;
         StatusChanged?.Invoke("Voz desativada");
     }
 
     public void Speak(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
+
         try
         {
             synthesizer ??= CreateSynthesizerSafe();
             if (synthesizer is null) return;
+
             synthesizer.SpeakAsyncCancelAll();
             synthesizer.SpeakAsync(text);
         }
         catch { }
+    }
+
+    private async Task DownloadModelAsync(CancellationToken ct)
+    {
+        var zipPath = Path.Combine(BaseFolder, "models", ModelFolderName + ".zip");
+        var tempFolder = Path.Combine(BaseFolder, "models", "_extract_" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            StatusChanged?.Invoke("Baixando modelo de voz PT-BR • aproximadamente 31 MB...");
+
+            using var response = await http.GetAsync(ModelZipUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            var total = response.Content.Headers.ContentLength;
+            await using var source = await response.Content.ReadAsStreamAsync(ct);
+            await using var target = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+
+            var buffer = new byte[81920];
+            long readTotal = 0;
+            int read;
+
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            {
+                await target.WriteAsync(buffer.AsMemory(0, read), ct);
+                readTotal += read;
+
+                if (total is > 0)
+                {
+                    var pct = (int)Math.Clamp(readTotal * 100 / total.Value, 0, 100);
+                    StatusChanged?.Invoke($"Baixando modelo de voz PT-BR • {pct}%");
+                }
+            }
+
+            await target.FlushAsync(ct);
+
+            StatusChanged?.Invoke("Instalando modelo de voz...");
+            Directory.CreateDirectory(tempFolder);
+            ZipFile.ExtractToDirectory(zipPath, tempFolder, true);
+
+            var extracted = Directory.GetDirectories(tempFolder)
+                .FirstOrDefault(x => Path.GetFileName(x).Equals(ModelFolderName, StringComparison.OrdinalIgnoreCase))
+                ?? Directory.GetDirectories(tempFolder).FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(extracted))
+                throw new InvalidOperationException("O modelo de voz foi baixado, mas não pôde ser extraído.");
+
+            if (Directory.Exists(ModelPath))
+                Directory.Delete(ModelPath, true);
+
+            Directory.Move(extracted, ModelPath);
+        }
+        finally
+        {
+            try { if (File.Exists(zipPath)) File.Delete(zipPath); } catch { }
+            try { if (Directory.Exists(tempFolder)) Directory.Delete(tempFolder, true); } catch { }
+        }
+    }
+
+    private void OnDataAvailable(object? sender, WaveInEventArgs e)
+    {
+        if (!running || e.BytesRecorded <= 0) return;
+
+        lock (sync)
+        {
+            try
+            {
+                if (recognizer is null) return;
+
+                var isFinal = recognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
+
+                if (isFinal)
+                {
+                    var text = ReadText(recognizer.Result(), "text");
+                    if (!string.IsNullOrWhiteSpace(text))
+                        HandleRecognizedText(text, isPartial: false);
+                }
+                else
+                {
+                    var partial = ReadText(recognizer.PartialResult(), "partial");
+                    if (!string.IsNullOrWhiteSpace(partial))
+                        HandleRecognizedText(partial, isPartial: true);
+                }
+
+                if (commandMode && DateTime.Now - commandStartedAt > TimeSpan.FromSeconds(9))
+                {
+                    commandMode = false;
+                    ResetRecognizer(wakeOnly: true);
+                    StatusChanged?.Invoke("Tempo esgotado. Diga “NOX” novamente.");
+                }
+            }
+            catch (Exception ex)
+            {
+                ErrorOccurred?.Invoke(ex.Message);
+            }
+        }
+    }
+
+    private void HandleRecognizedText(string text, bool isPartial)
+    {
+        var normalized = Normalize(text);
+
+        if (!commandMode)
+        {
+            if (ContainsWakeWord(normalized))
+            {
+                commandMode = true;
+                commandStartedAt = DateTime.Now;
+
+                SystemSounds.Asterisk.Play();
+                StatusChanged?.Invoke("NOX ativado • ouvindo comando...");
+
+                ResetRecognizer(wakeOnly: false);
+            }
+
+            return;
+        }
+
+        if (isPartial) return;
+
+        var command = text.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+            return;
+
+        commandMode = false;
+        ResetRecognizer(wakeOnly: true);
+
+        StatusChanged?.Invoke($"Ouvi: {command}");
+        CommandRecognized?.Invoke(command);
+    }
+
+    private void ResetRecognizer(bool wakeOnly)
+    {
+        recognizer?.Dispose();
+        recognizer = null;
+
+        if (model is null) return;
+
+        if (wakeOnly)
+        {
+            var grammar = JsonSerializer.Serialize(new[]
+            {
+                "nox", "nóx", "nocs", "nocks", "noques", "[unk]"
+            });
+
+            recognizer = new VoskRecognizer(model, 16000.0f, grammar);
+        }
+        else
+        {
+            recognizer = new VoskRecognizer(model, 16000.0f);
+            recognizer.SetWords(true);
+        }
+    }
+
+    private static string ReadText(string json, string property)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty(property, out var p))
+                return p.GetString() ?? "";
+        }
+        catch { }
+
+        return "";
+    }
+
+    private static bool ContainsWakeWord(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return tokens.Any(t => t is "nox" or "nocs" or "nocks" or "noques");
+    }
+
+    private static string Normalize(string value)
+    {
+        return (value ?? "")
+            .Trim()
+            .ToLowerInvariant()
+            .Replace("ó", "o")
+            .Replace("ô", "o")
+            .Replace("ò", "o");
     }
 
     private static SpeechSynthesizer? CreateSynthesizerSafe()
@@ -108,88 +326,10 @@ public sealed class VoiceService : IDisposable
         catch { return null; }
     }
 
-    private void StartWakeRecognition()
-    {
-        if (!running || recognizer is null) return;
-
-        try
-        {
-            recognizer.RecognizeAsyncCancel();
-            recognizer.UnloadAllGrammars();
-
-            var choices = new Choices("nox", "nóx", "nocs", "nócs", "nocks");
-            var builder = new GrammarBuilder { Culture = recognizer.RecognizerInfo.Culture };
-            builder.Append(choices);
-            var grammar = new Grammar(builder) { Name = "wake" };
-            recognizer.LoadGrammar(grammar);
-
-            waitingForCommand = false;
-            recognizer.RecognizeAsync(RecognizeMode.Multiple);
-            StatusChanged?.Invoke("Aguardando “NOX”...");
-        }
-        catch (Exception ex)
-        {
-            running = false;
-            ErrorOccurred?.Invoke(ex.Message);
-        }
-    }
-
-    private async void OnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
-    {
-        if (!running || recognizer is null) return;
-
-        try
-        {
-            if (!waitingForCommand)
-            {
-                if (e.Result.Confidence < 0.45) return;
-
-                waitingForCommand = true;
-                try { recognizer.RecognizeAsyncCancel(); } catch { }
-                SystemSounds.Asterisk.Play();
-                StatusChanged?.Invoke("NOX ativado • ouvindo comando...");
-
-                await Task.Delay(250);
-                if (!running) return;
-
-                recognizer.UnloadAllGrammars();
-                var dictation = new DictationGrammar { Name = "command" };
-                recognizer.LoadGrammar(dictation);
-                recognizer.RecognizeAsync(RecognizeMode.Single);
-                return;
-            }
-
-            if (e.Result.Confidence < 0.25)
-            {
-                waitingForCommand = false;
-                StatusChanged?.Invoke("Comando pouco claro. Diga “NOX” novamente.");
-                StartWakeRecognition();
-                return;
-            }
-
-            var text = e.Result.Text?.Trim() ?? "";
-            waitingForCommand = false;
-
-            if (text.Length > 0)
-            {
-                StatusChanged?.Invoke($"Ouvi: {text}");
-                CommandRecognized?.Invoke(text);
-            }
-
-            await Task.Delay(300);
-            StartWakeRecognition();
-        }
-        catch (Exception ex)
-        {
-            waitingForCommand = false;
-            ErrorOccurred?.Invoke(ex.Message);
-            StartWakeRecognition();
-        }
-    }
-
     private void TrySelectPortugueseVoice()
     {
         if (synthesizer is null) return;
+
         try
         {
             var pt = synthesizer.GetInstalledVoices()
@@ -211,6 +351,8 @@ public sealed class VoiceService : IDisposable
     {
         Stop();
         try { recognizer?.Dispose(); } catch { }
+        try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
+        http.Dispose();
     }
 }
