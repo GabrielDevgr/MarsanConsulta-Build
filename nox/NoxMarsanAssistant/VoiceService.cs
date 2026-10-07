@@ -155,7 +155,7 @@ public sealed class VoiceService : IDisposable
             ResetRecognizer(wakeOnly: true);
 
             waveIn.StartRecording();
-            StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
+            StatusChanged?.Invoke("Aguardando “Grok”...");
 
             if (string.IsNullOrWhiteSpace(groqApiKey))
             {
@@ -508,7 +508,7 @@ public sealed class VoiceService : IDisposable
 
         if (!commandSpeechStarted || pcm.Length < 8000)
         {
-            StatusChanged?.Invoke("Não ouvi um comando. Diga “MS” novamente.");
+            StatusChanged?.Invoke("Não ouvi um comando. Diga “Grok” novamente.");
             DiagnosticLog?.Invoke("[WHISPER] Captura encerrada sem fala suficiente.");
             return;
         }
@@ -546,7 +546,7 @@ public sealed class VoiceService : IDisposable
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    StatusChanged?.Invoke("Não identifiquei a fala. Diga “MS” novamente.");
+                    StatusChanged?.Invoke("Não identifiquei a fala. Diga “Grok” novamente.");
                     DiagnosticLog?.Invoke("[STT] Transcrição vazia.");
                     return;
                 }
@@ -563,7 +563,7 @@ public sealed class VoiceService : IDisposable
                 whisperBusy = false;
                 cooldownUntil = DateTime.Now.AddMilliseconds(900);
                 SetState(AssistantState.Cooldown);
-                StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
+                StatusChanged?.Invoke("Aguardando “Grok”...");
             }
         });
     }
@@ -594,11 +594,9 @@ public sealed class VoiceService : IDisposable
 
         if (wakeOnly)
         {
-            var wakeWords = new[]
-            {
-                "eme", "em", "esse", "ese", "se", "s",
-                "eme esse", "eme se", "eme s", "m s", "ms"
-            };
+            // Gramática fechada de uma única palavra, como assistentes modernos.
+            // As variações abaixo representam a mesma pronúncia esperada de "Grok".
+            var wakeWords = new[] { "grok", "groque", "grock", "grog", "croque" };
             var grammar = JsonSerializer.Serialize(wakeWords);
             recognizer = new VoskRecognizer(model, 16000.0f, grammar);
         }
@@ -612,7 +610,6 @@ public sealed class VoiceService : IDisposable
 
     private bool TryHandleWakeSequence(string normalized, bool isPartial)
     {
-        // Durante processamento/escuta/resposta, wake word fica bloqueada.
         if (state is AssistantState.Processing or AssistantState.Speaking or
             AssistantState.Cooldown or AssistantState.Listening or AssistantState.Guard)
             return false;
@@ -621,46 +618,16 @@ public sealed class VoiceService : IDisposable
         if (string.IsNullOrWhiteSpace(n))
             return false;
 
-        var now = DateTime.Now;
-
-        // Hipótese completa: como o recognizer de espera usa gramática fechada
-        // exclusivamente para MS, não exigimos repetição. Parcial ou final,
-        // "eme esse", "eme s", "eme se", "ms" já confirma a wake word.
-        if (n is "eme esse" or "eme se" or "eme s" or "m s" or "ms" or "emese")
-        {
-            ActivateWake(n);
-            return true;
-        }
-
-        // Expira rapidamente uma primeira metade antiga.
-        if (wakeSequenceArmed &&
-            now - wakeSequenceStartedAt > TimeSpan.FromMilliseconds(1800))
-        {
-            wakeSequenceArmed = false;
-            consecutiveWakeHits = 0;
-            SetState(AssistantState.Idle);
-        }
-
-        // Primeira metade.
-        if (!wakeSequenceArmed && (n == "eme" || n == "em"))
-        {
-            wakeSequenceArmed = true;
-            wakeSequenceStartedAt = now;
-            consecutiveWakeHits = 1;
-            SetState(AssistantState.WakeArmed);
-            DiagnosticLog?.Invoke($"[WAKE] primeira parte detectada: \"{n}\"");
+        // Wake word de palavra única. Com a gramática fechada do Vosk,
+        // qualquer uma destas formas representa "Grok".
+        var accepted = n is "grok" or "groque" or "grock" or "grog" or "croque";
+        if (!accepted)
             return false;
-        }
 
-        // Segunda metade dentro da janela.
-        if (wakeSequenceArmed &&
-            (n == "s" || n == "se" || n == "esse" || n == "ese"))
-        {
-            ActivateWake(n);
-            return true;
-        }
-
-        return false;
+        // Resultado parcial exato já é suficiente: não precisamos esperar
+        // o Vosk encerrar a frase e isso deixa a ativação muito mais rápida.
+        ActivateWake(n);
+        return true;
     }
 
     private void ActivateWake(string heard)
@@ -669,9 +636,9 @@ public sealed class VoiceService : IDisposable
         consecutiveWakeHits = 0;
 
         PlayActivationTone();
-        DiagnosticLog?.Invoke($"[WAKE] MS confirmado: \"{heard}\"");
-        DiagnosticLog?.Invoke("[MS ATIVADO] >>> LISTENING <<< • Groq STT");
-        StatusChanged?.Invoke("MS ATIVADO • fale o nome...");
+        DiagnosticLog?.Invoke($"[WAKE] GROK confirmado: \"{heard}\"");
+        DiagnosticLog?.Invoke("[GROK ATIVADO] >>> LISTENING <<< • Groq STT");
+        StatusChanged?.Invoke("GROK ATIVADO • fale o nome...");
         BeginWhisperCommandCapture();
     }
 
