@@ -28,9 +28,10 @@ public static class MarsanVocabulary
             ]
         };
 
-    public static List<VoiceEntity> BuildEntities(IEnumerable<string> accountNames)
+    public static List<VoiceEntity> BuildEntities(IEnumerable<string> accountNames, VoiceTrainingProfile? training = null)
     {
         var entities = new List<VoiceEntity>();
+        training ??= new VoiceTrainingProfile();
 
         foreach (var account in accountNames
             .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -41,8 +42,7 @@ public static class MarsanVocabulary
 
             // Reaproveita amostras aprendidas localmente, sem tornar o sistema
             // dependente delas para funcionar.
-            var profile = VoiceTrainingStore.Load();
-            foreach (var entry in profile.Terms)
+            foreach (var entry in training.Terms)
             {
                 var keyNorm = VoiceTextNormalizer.Normalize(entry.Key);
                 var displayNorm = VoiceTextNormalizer.Normalize(display);
