@@ -89,7 +89,7 @@ public sealed class MainForm : Form
                 printService.Start(() => cfg);
 
             if (cfg.StartListeningOnLaunch)
-                StartVoice();
+                _ = StartVoiceAsync();
         };
     }
 
@@ -116,7 +116,7 @@ public sealed class MainForm : Form
         var logo = new Label { Text = "N", ForeColor = Green, BackColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(24, 22, 52, 52) };
         var title = new Label { Text = "NOX", ForeColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = true, Left = 92, Top = 18 };
         var sub = new Label { Text = "Marsan Assistant", ForeColor = Color.FromArgb(205, 224, 213), Font = new Font("Segoe UI", 11), AutoSize = true, Left = 95, Top = 56 };
-        var badge = new Label { Text = "v0.2.2", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
+        var badge = new Label { Text = "v0.3.0", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
         header.Controls.AddRange(new Control[] { logo, title, sub, badge });
         Controls.Add(header);
 
@@ -250,7 +250,7 @@ public sealed class MainForm : Form
 
         var note = new Label
         {
-            Text = "A palavra de ativação e o reconhecimento de voz desta versão usam o mecanismo de voz instalado no Windows.\nPara melhor resultado, instale o pacote de fala Português (Brasil) nas Configurações do Windows.",
+            Text = "O reconhecimento agora é offline e independente do reconhecimento de voz do Windows.\nNa primeira ativação, o NOX baixa automaticamente o modelo PT-BR (~31 MB).",
             ForeColor = Muted, AutoSize = true, Left = 28, Top = 490
         };
 
@@ -267,15 +267,19 @@ public sealed class MainForm : Form
         parent.Controls.Add(box);
     }
 
-    private void ToggleVoice()
+    private async void ToggleVoice()
     {
         if (voice.IsRunning) StopVoice();
-        else StartVoice();
+        else await StartVoiceAsync();
     }
 
-    private void StartVoice()
+    private async Task StartVoiceAsync()
     {
-        voice.Start();
+        voiceToggle.Enabled = false;
+        voiceToggle.Text = "Preparando...";
+        await voice.StartAsync();
+        voiceToggle.Enabled = true;
+
         if (voice.IsRunning)
         {
             voiceToggle.Text = "⏹ Desativar voz";
@@ -283,6 +287,10 @@ public sealed class MainForm : Form
             Log("VOZ", string.IsNullOrWhiteSpace(voice.RecognizerName)
                 ? "Escuta ativada."
                 : $"Escuta ativada com {voice.RecognizerName}.");
+        }
+        else
+        {
+            voiceToggle.Text = "🎤 Ativar voz";
         }
     }
 
