@@ -76,7 +76,7 @@ public sealed class NoxCommandService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var matched = FindBestAccount(target, accounts);
+        var matched = VoiceTrainingStore.ResolveAccount(target, accounts) ?? FindBestAccount(target, accounts);
         if (matched is null)
             return new(false, $"Não encontrei uma planilha parecida com “{target}”.");
 
