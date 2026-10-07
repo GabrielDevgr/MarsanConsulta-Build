@@ -44,8 +44,13 @@ public static class MarsanVocabulary
             var profile = VoiceTrainingStore.Load();
             foreach (var entry in profile.Terms)
             {
-                if (VoiceSimilarity.Similarity(entry.Key, display) >= 0.58 ||
-                    VoiceSimilarity.PhoneticSimilarity(entry.Key, display) >= 0.68)
+                var keyNorm = VoiceTextNormalizer.Normalize(entry.Key);
+                var displayNorm = VoiceTextNormalizer.Normalize(display);
+                var sameCanonical = keyNorm == displayNorm ||
+                    (VoiceTextNormalizer.Tokens(keyNorm).Count == VoiceTextNormalizer.Tokens(displayNorm).Count &&
+                     VoiceSimilarity.Similarity(keyNorm, displayNorm) >= 0.92);
+
+                if (sameCanonical)
                 {
                     foreach (var alias in entry.Value)
                         AddUnique(aliases, alias);
@@ -101,9 +106,6 @@ public static class MarsanVocabulary
 
         var withoutType = Regex.Replace(clean, @"\b(TORAS?|MADEIRA|SERRAGEM|LIXO)\b", " ", RegexOptions.IgnoreCase);
         AddUnique(list, Regex.Replace(withoutType, @"\s+", " ").Trim());
-
-        foreach (var token in VoiceTextNormalizer.Tokens(withoutType))
-            if (token.Length >= 4) AddUnique(list, token);
 
         if (display.Contains("NFE", StringComparison.OrdinalIgnoreCase))
         {
