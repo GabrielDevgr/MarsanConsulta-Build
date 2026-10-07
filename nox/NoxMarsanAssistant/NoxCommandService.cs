@@ -29,12 +29,34 @@ public sealed class NoxCommandService
         }
 
         if (normalized.Contains("status"))
-            return new(true, $"NOX ativo. Impressora: {(string.IsNullOrWhiteSpace(cfg.PrinterName) ? "não configurada" : cfg.PrinterName)}.");
+            return new(true, $"MARSAN ativo. Impressora: {(string.IsNullOrWhiteSpace(cfg.PrinterName) ? "não configurada" : cfg.PrinterName)}.");
 
-        if (normalized.Contains("imprim") || normalized.StartsWith("print "))
+        if (LooksLikePrintCommand(normalized))
             return await HandlePrintAsync(command, cfg, ct);
 
-        return new(false, "Ainda não reconheço esse comando. Nesta versão, tente algo como: “imprima Santa Clara”.");
+        return new(false, "Ainda não reconheço esse comando. Tente algo como: “imprima Santa Clara”.");
+    }
+
+    private static bool LooksLikePrintCommand(string normalized)
+    {
+        if (string.IsNullOrWhiteSpace(normalized)) return false;
+
+        var first = normalized
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? "";
+
+        var variants = new[]
+        {
+            "imprima", "imprime", "imprimir", "imprimi", "imprime",
+            "prima", "prime", "imprimaa", "inprima", "emprima", "imprina",
+            "print"
+        };
+
+        if (variants.Contains(first, StringComparer.OrdinalIgnoreCase))
+            return true;
+
+        return first.Length >= 4 &&
+               variants.Any(v => Similarity(first, v) >= 0.67);
     }
 
     private async Task<NoxCommandResult> HandlePrintAsync(string command, NoxConfig cfg, CancellationToken ct)
