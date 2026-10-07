@@ -491,7 +491,7 @@ public sealed class VoiceService : IDisposable
         if (string.IsNullOrWhiteSpace(normalized)) return "";
 
         foreach (var alias in MarsanVocabulary.GetWakeAliases()
-                     .Select(VoiceTextNormalizer.Normalize)
+                     .Select(x => VoiceTextNormalizer.Normalize(x))
                      .Where(x => !string.IsNullOrWhiteSpace(x))
                      .OrderByDescending(x => x.Length))
         {
