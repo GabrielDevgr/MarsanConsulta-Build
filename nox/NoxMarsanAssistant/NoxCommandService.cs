@@ -70,6 +70,57 @@ public sealed class NoxCommandService
             cfg.VoiceRecognition ?? new VoiceRecognitionSettings(),
             wakeRequired: false);
 
+        // Fase atual do assistente: após a ativação, todo comando é de impressão.
+        // Portanto, não exigimos que o STT reconheça o verbo. O problema passa a
+        // ser somente identificar com segurança qual documento/planilha foi citado.
+        if (interpretation.Entity is not null &&
+            interpretation.Entity.Printable &&
+            interpretation.EntityScore is not null)
+        {
+            var bestScore = interpretation.EntityScore.FinalScore;
+            var secondScore = interpretation.SecondEntityScore?.FinalScore ?? 0.0;
+            var margin = bestScore - secondScore;
+
+            // Nome muito claro: imprime direto.
+            if (bestScore >= 0.86 && margin >= 0.12)
+            {
+                var diagnostics = interpretation.Diagnostics.ToList();
+                diagnostics.Add(
+                    $"[PRINT-ONLY MODE] Entidade identificada com {bestScore:P0} " +
+                    $"e margem {margin:P0}; PRINT assumido automaticamente.");
+
+                return await ExecutePrintAsync(
+                    interpretation.Entity,
+                    ExtractCopies(command),
+                    data.RootElement,
+                    cfg,
+                    ct,
+                    diagnostics);
+            }
+
+            // Nome razoavelmente claro: pede confirmação em vez de arriscar.
+            if (bestScore >= 0.68 && margin >= 0.10)
+            {
+                pending = new PendingVoiceAction(
+                    MarsanIntent.Print,
+                    interpretation.Entity.Id,
+                    interpretation.Entity.DisplayName,
+                    ExtractCopies(command),
+                    DateTime.Now);
+
+                var diagnostics = interpretation.Diagnostics.ToList();
+                diagnostics.Add(
+                    $"[PRINT-ONLY MODE] Entidade provável {interpretation.Entity.DisplayName} " +
+                    $"({bestScore:P0}, margem {margin:P0}); confirmação solicitada.");
+
+                return new(
+                    false,
+                    $"Você quis dizer imprimir {interpretation.Entity.DisplayName}?",
+                    true,
+                    diagnostics);
+            }
+        }
+
         // Recuperação contextual para comandos de voz:
         // após o usuário ativar o MS, o Whisper às vezes perde apenas o verbo
         // ("imprima") e preserva perfeitamente o documento ("gelenski").
