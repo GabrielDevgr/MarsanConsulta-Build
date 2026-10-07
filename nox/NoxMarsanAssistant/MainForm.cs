@@ -361,7 +361,7 @@ public sealed class MainForm : Form
         output.ScrollBars = ScrollBars.Vertical;
         output.BorderStyle = BorderStyle.None;
         output.BackColor = Color.FromArgb(248, 250, 249);
-        output.ForeColor = Text;
+        output.ForeColor = TextColor;
         output.Font = new Font("Consolas", 9.2f);
 
         logCard.Controls.Add(output);
@@ -432,7 +432,7 @@ public sealed class MainForm : Form
         AddLabeled(integrations, "Chave da API Marsan Consulta", consultaKey, 24, 122, true, 748);
 
         var behavior = CreateCard("Comportamento", 0, 240, 800, 220);
-        behavior.Controls.Add(new Label { Text = "Intervalo de consulta", Left = 24, Top = 54, Width = 180, ForeColor = Text });
+        behavior.Controls.Add(new Label { Text = "Intervalo de consulta", Left = 24, Top = 54, Width = 180, ForeColor = TextColor });
         poll.Left = 210;
         poll.Top = 48;
         poll.Width = 95;
