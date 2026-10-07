@@ -8,6 +8,8 @@ namespace NoxMarsanAssistant;
 public sealed class NoxCommandService
 {
     private readonly MarsanApiClient api = new();
+    private readonly MarsanVoiceInterpreter interpreter = new();
+    private PendingVoiceAction? pending;
 
     public async Task<NoxCommandResult> ExecuteAsync(string rawCommand, NoxConfig cfg, CancellationToken ct)
     {
@@ -15,7 +17,27 @@ public sealed class NoxCommandService
         if (string.IsNullOrWhiteSpace(command))
             return new(false, "Diga ou digite um comando.");
 
-        var normalized = Normalize(command);
+        var normalized = VoiceTextNormalizer.Normalize(command);
+
+        if (pending is not null)
+        {
+            if (IsAffirmative(normalized))
+            {
+                var action = pending;
+                pending = null;
+                return await ExecutePendingAsync(action, cfg, ct);
+            }
+
+            if (IsNegative(normalized))
+            {
+                pending = null;
+                return new(false, "Certo. Comando cancelado.");
+            }
+
+            // Uma nova frase completa substitui a confirmação anterior.
+            if (normalized.Length > 2)
+                pending = null;
+        }
 
         if (normalized.Contains("abrir pasta") || normalized.Contains("abrir impressos"))
         {
@@ -31,41 +53,6 @@ public sealed class NoxCommandService
         if (normalized.Contains("status"))
             return new(true, $"MARSAN ativo. Impressora: {(string.IsNullOrWhiteSpace(cfg.PrinterName) ? "não configurada" : cfg.PrinterName)}.");
 
-        if (LooksLikePrintCommand(normalized))
-            return await HandlePrintAsync(command, cfg, ct);
-
-        return new(false, "Ainda não reconheço esse comando. Tente algo como: “imprima Santa Clara”.");
-    }
-
-    private static bool LooksLikePrintCommand(string normalized)
-    {
-        if (string.IsNullOrWhiteSpace(normalized)) return false;
-
-        var first = normalized
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault() ?? "";
-
-        var variants = new[]
-        {
-            "imprima", "imprime", "imprimir", "imprimi", "imprime",
-            "prima", "prime", "imprimaa", "inprima", "emprima", "imprina",
-            "print"
-        };
-
-        if (variants.Contains(first, StringComparer.OrdinalIgnoreCase))
-            return true;
-
-        return first.Length >= 4 &&
-               variants.Any(v => Similarity(first, v) >= 0.67);
-    }
-
-    private async Task<NoxCommandResult> HandlePrintAsync(string command, NoxConfig cfg, CancellationToken ct)
-    {
-        var copies = ExtractCopies(command);
-        var target = ExtractTarget(command);
-        if (string.IsNullOrWhiteSpace(target))
-            return new(false, "Qual planilha você quer imprimir?");
-
         using var data = await api.GetConsultaDataAsync(cfg, ct);
         if (!data.RootElement.TryGetProperty("movements", out var movements) || movements.ValueKind != JsonValueKind.Array)
             return new(false, "A API não retornou as movimentações esperadas.");
@@ -76,22 +63,103 @@ public sealed class NoxCommandService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var matched = VoiceTrainingStore.ResolveAccount(target, accounts) ?? FindBestAccount(target, accounts);
-        if (matched is null)
-            return new(false, $"Não encontrei uma planilha parecida com “{target}”.");
+        var entities = MarsanVocabulary.BuildEntities(accounts);
+        var interpretation = interpreter.Interpret(
+            command,
+            entities,
+            cfg.VoiceRecognition ?? new VoiceRecognitionSettings(),
+            wakeRequired: false);
 
-        var html = BuildPrintableHtml(data.RootElement, matched);
-        var customer = CleanAccountName(matched);
+        if (interpretation.ShouldExecute && interpretation.Entity is not null)
+        {
+            if (interpretation.Intent == MarsanIntent.Print)
+                return await ExecutePrintAsync(interpretation.Entity, ExtractCopies(command), data.RootElement, cfg, ct, interpretation.Diagnostics);
+
+            if (interpretation.Intent == MarsanIntent.Open)
+                return new(false,
+                    $"Entendi que você quer abrir {interpretation.Entity.DisplayName}, mas a abertura visual ainda não está ligada a uma ação nesta versão.",
+                    false,
+                    interpretation.Diagnostics);
+        }
+
+        if (interpretation.RequiresConfirmation && interpretation.Entity is not null)
+        {
+            pending = new PendingVoiceAction(
+                interpretation.Intent,
+                interpretation.Entity.Id,
+                interpretation.Entity.DisplayName,
+                ExtractCopies(command),
+                DateTime.Now);
+
+            return new(false,
+                interpretation.ConfirmationPrompt ?? $"Você quis dizer {interpretation.Entity.DisplayName}?",
+                true,
+                interpretation.Diagnostics);
+        }
+
+        var message = interpretation.Intent == MarsanIntent.Unknown
+            ? "Não consegui identificar a ação do comando."
+            : "Não consegui identificar o documento com segurança.";
+
+        return new(false, message, false, interpretation.Diagnostics);
+    }
+
+    private async Task<NoxCommandResult> ExecutePendingAsync(PendingVoiceAction action, NoxConfig cfg, CancellationToken ct)
+    {
+        if (DateTime.Now - action.CreatedAt > TimeSpan.FromSeconds(30))
+            return new(false, "A confirmação expirou. Repita o comando.");
+
+        if (action.Intent != MarsanIntent.Print)
+            return new(false, "Essa ação ainda não está disponível.");
+
+        using var data = await api.GetConsultaDataAsync(cfg, ct);
+        return await ExecutePrintByIdAsync(action.EntityId, action.EntityDisplayName, action.Copies, data.RootElement, cfg, ct);
+    }
+
+    private async Task<NoxCommandResult> ExecutePrintAsync(
+        VoiceEntity entity,
+        int copies,
+        JsonElement root,
+        NoxConfig cfg,
+        CancellationToken ct,
+        IReadOnlyList<string> diagnostics)
+    {
+        if (!entity.Printable)
+            return new(false, $"{entity.DisplayName} não é um documento imprimível.", false, diagnostics);
+
+        return await ExecutePrintByIdAsync(entity.Id, entity.DisplayName, copies, root, cfg, ct, diagnostics);
+    }
+
+    private async Task<NoxCommandResult> ExecutePrintByIdAsync(
+        string accountId,
+        string displayName,
+        int copies,
+        JsonElement root,
+        NoxConfig cfg,
+        CancellationToken ct,
+        IReadOnlyList<string>? diagnostics = null)
+    {
+        var rowsExist = root.GetProperty("movements").EnumerateArray()
+            .Any(x => x.TryGetProperty("conta", out var c) &&
+                      string.Equals(c.GetString(), accountId, StringComparison.OrdinalIgnoreCase));
+
+        if (!rowsExist)
+            return new(false, $"A planilha {displayName} não está disponível para impressão.", false, diagnostics);
+
+        var html = BuildPrintableHtml(root, accountId);
+        var customer = CleanAccountName(accountId);
         await api.CreateRemotePrintAsync(cfg, customer, "Controle de Cargas e Saldo", html, copies, ct);
 
-        return new(true, copies > 1
+        var message = copies > 1
             ? $"Certo. Enviei {copies} cópias de {customer} para impressão."
-            : $"Certo. Enviei a planilha de {customer} para impressão.");
+            : $"Certo. Enviei a planilha de {customer} para impressão.";
+
+        return new(true, message, false, diagnostics);
     }
 
     private static int ExtractCopies(string command)
     {
-        var n = Normalize(command);
+        var n = VoiceTextNormalizer.Normalize(command);
         var digit = Regex.Match(n, @"\b(\d{1,2})\s*(copias|copia|vias|via)\b");
         if (digit.Success && int.TryParse(digit.Groups[1].Value, out var value))
             return Math.Clamp(value, 1, 20);
@@ -101,72 +169,23 @@ public sealed class NoxCommandService
             ["uma copia"] = 1, ["duas copias"] = 2, ["dois copias"] = 2,
             ["tres copias"] = 3, ["quatro copias"] = 4, ["cinco copias"] = 5
         };
+
         foreach (var item in words)
-            if (n.Contains(item.Key)) return item.Value;
+            if (n.Contains(item.Key, StringComparison.Ordinal)) return item.Value;
 
         return 1;
     }
 
-    private static string ExtractTarget(string command)
+    private static bool IsAffirmative(string value)
     {
-        var value = Normalize(command);
-        value = Regex.Replace(value, @"\b(nox|por favor|pra mim|para mim|agora)\b", " ");
-        value = Regex.Replace(value, @"\b(imprima|imprime|imprimir|print)\b", " ");
-        value = Regex.Replace(value, @"\b(a|o|as|os|da|do|de)\s+planilha\b", " ");
-        value = Regex.Replace(value, @"\bplanilha\b", " ");
-        value = Regex.Replace(value, @"\b\d{1,2}\s*(copias|copia|vias|via)\b", " ");
-        value = Regex.Replace(value, @"\b(uma|duas|dois|tres|quatro|cinco)\s+(copias|copia|vias|via)\b", " ");
-        return Regex.Replace(value, @"\s+", " ").Trim();
+        var aliases = new[] { "sim", "isso", "exato", "correto", "pode", "confirmo", "confirmar" };
+        return aliases.Any(x => VoiceSimilarity.Similarity(value, x) >= 0.78);
     }
 
-    private static string? FindBestAccount(string target, List<string> accounts)
+    private static bool IsNegative(string value)
     {
-        var nt = Normalize(target);
-
-        var exact = accounts.FirstOrDefault(a => Normalize(CleanAccountName(a)) == nt);
-        if (exact is not null) return exact;
-
-        var contains = accounts.FirstOrDefault(a =>
-            Normalize(CleanAccountName(a)).Contains(nt) || nt.Contains(Normalize(CleanAccountName(a))));
-        if (contains is not null) return contains;
-
-        var scored = accounts
-            .Select(a => new { Account = a, Score = Similarity(nt, Normalize(CleanAccountName(a))) })
-            .OrderByDescending(x => x.Score)
-            .FirstOrDefault();
-
-        return scored is { Score: >= 0.45 } ? scored.Account : null;
-    }
-
-    private static double Similarity(string a, string b)
-    {
-        if (a.Length == 0 || b.Length == 0) return 0;
-        var distance = Levenshtein(a, b);
-        return 1.0 - (double)distance / Math.Max(a.Length, b.Length);
-    }
-
-    private static int Levenshtein(string a, string b)
-    {
-        var d = new int[a.Length + 1, b.Length + 1];
-        for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
-        for (int j = 0; j <= b.Length; j++) d[0, j] = j;
-        for (int i = 1; i <= a.Length; i++)
-            for (int j = 1; j <= b.Length; j++)
-                d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
-                    d[i - 1, j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
-        return d[a.Length, b.Length];
-    }
-
-    private static string Normalize(string value)
-    {
-        var form = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder();
-        foreach (var ch in form)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(ch) != UnicodeCategory.NonSpacingMark)
-                sb.Append(ch);
-        }
-        return sb.ToString().Normalize(NormalizationForm.FormC);
+        var aliases = new[] { "nao", "não", "cancela", "cancelar", "errado", "negativo" };
+        return aliases.Any(x => VoiceSimilarity.Similarity(value, x) >= 0.78);
     }
 
     private static string CleanAccountName(string value) =>
