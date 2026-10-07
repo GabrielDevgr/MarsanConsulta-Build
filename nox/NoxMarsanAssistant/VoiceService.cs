@@ -27,6 +27,8 @@ public sealed class VoiceService : IDisposable
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly SemaphoreSlim initLock = new(1, 1);
     private readonly WhisperLocalService whisper = new();
+    private readonly GroqSttService groq = new();
+    private string groqApiKey = "";
 
     private WaveInEvent? waveIn;
     private Model? model;
@@ -70,6 +72,7 @@ public sealed class VoiceService : IDisposable
     {
         whisper.StatusChanged += s => StatusChanged?.Invoke(s);
         whisper.DiagnosticLog += s => DiagnosticLog?.Invoke(s);
+        groq.DiagnosticLog += s => DiagnosticLog?.Invoke(s);
     }
 
     private static string BaseFolder =>
@@ -113,10 +116,14 @@ public sealed class VoiceService : IDisposable
         }
     }
 
-    public async Task StartAsync(VoiceRecognitionSettings? settings = null, CancellationToken ct = default)
+    public async Task StartAsync(
+        VoiceRecognitionSettings? settings = null,
+        string? groqKey = null,
+        CancellationToken ct = default)
     {
         if (running) return;
         recognitionSettings = settings ?? new VoiceRecognitionSettings();
+        groqApiKey = (groqKey ?? "").Trim();
 
         try
         {
@@ -150,14 +157,20 @@ public sealed class VoiceService : IDisposable
             waveIn.StartRecording();
             StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
 
-            // Prepara o Whisper em segundo plano. Na primeira execução baixa
-            // binário + modelo; depois todo o reconhecimento funciona offline.
-            _ = Task.Run(async () =>
+            if (string.IsNullOrWhiteSpace(groqApiKey))
             {
-                var ok = await whisper.PrepareAsync();
-                if (ok)
-                    DiagnosticLog?.Invoke("[WHISPER] Motor local pronto para comandos.");
-            });
+                DiagnosticLog?.Invoke("[STT] Groq não configurado; preparando fallback local.");
+                _ = Task.Run(async () =>
+                {
+                    var ok = await whisper.PrepareAsync();
+                    if (ok)
+                        DiagnosticLog?.Invoke("[WHISPER] Motor local pronto para fallback.");
+                });
+            }
+            else
+            {
+                DiagnosticLog?.Invoke("[STT] Groq Whisper Large V3 configurado como motor principal.");
+            }
         }
         catch (Exception ex)
         {
@@ -508,17 +521,37 @@ public sealed class VoiceService : IDisposable
         {
             try
             {
-                var text = await whisper.TranscribePcmAsync(pcm);
+                string text = "";
+
+                if (!string.IsNullOrWhiteSpace(groqApiKey))
+                {
+                    try
+                    {
+                        StatusChanged?.Invoke("Groq • entendendo o comando...");
+                        text = await groq.TranscribePcmAsync(pcm, groqApiKey);
+                        DiagnosticLog?.Invoke($"[STT GROQ] \"{text}\"");
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagnosticLog?.Invoke($"[GROQ] Falhou; usando fallback local: {ex.Message}");
+                    }
+                }
 
                 if (string.IsNullOrWhiteSpace(text))
                 {
-                    StatusChanged?.Invoke("Whisper não identificou fala. Diga “MS” novamente.");
-                    DiagnosticLog?.Invoke("[WHISPER] Transcrição vazia.");
+                    StatusChanged?.Invoke("Fallback local • entendendo o comando...");
+                    text = await whisper.TranscribePcmAsync(pcm);
+                    DiagnosticLog?.Invoke($"[STT LOCAL] \"{text}\"");
+                }
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    StatusChanged?.Invoke("Não identifiquei a fala. Diga “MS” novamente.");
+                    DiagnosticLog?.Invoke("[STT] Transcrição vazia.");
                     return;
                 }
 
-                StatusChanged?.Invoke($"Whisper ouviu: {text}");
-                DiagnosticLog?.Invoke($"[STT WHISPER] \"{text}\"");
+                StatusChanged?.Invoke($"Ouvi: {text}");
                 CommandRecognized?.Invoke(text);
             }
             catch (Exception ex)
@@ -927,6 +960,7 @@ public sealed class VoiceService : IDisposable
         try { recognizer?.Dispose(); } catch { }
         try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
+        groq.Dispose();
         whisper.Dispose();
         initLock.Dispose();
         http.Dispose();
