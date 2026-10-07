@@ -37,6 +37,7 @@ public sealed class VoiceService : IDisposable
     private bool commandSpeechStarted;
     private DateTime lastCommandVoiceAt = DateTime.MinValue;
     private bool whisperBusy;
+    private DateTime suppressRecognitionUntil = DateTime.MinValue;
     private readonly Queue<byte[]> recentAudio = new();
     private int recentAudioBytes;
     private const int RecentAudioMaxBytes = 32000; // ~1 segundo em PCM 16kHz mono 16-bit
@@ -211,6 +212,11 @@ public sealed class VoiceService : IDisposable
             synthesizer ??= CreateSynthesizerSafe();
             if (synthesizer is null) return;
 
+            // Evita o assistente escutar a própria resposta e disparar uma
+            // nova wake word. A janela é proporcional ao tamanho da frase.
+            var estimatedSeconds = Math.Clamp(text.Length / 13.0 + 0.8, 1.5, 12.0);
+            suppressRecognitionUntil = DateTime.Now.AddSeconds(estimatedSeconds);
+
             synthesizer.SpeakAsyncCancelAll();
             synthesizer.SpeakAsync(text);
         }
@@ -281,6 +287,9 @@ public sealed class VoiceService : IDisposable
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
         if (!running || e.BytesRecorded <= 0) return;
+
+        if (DateTime.Now < suppressRecognitionUntil)
+            return;
 
         lock (sync)
         {
