@@ -37,6 +37,9 @@ public sealed class VoiceService : IDisposable
     private bool commandSpeechStarted;
     private DateTime lastCommandVoiceAt = DateTime.MinValue;
     private bool whisperBusy;
+    private readonly Queue<byte[]> recentAudio = new();
+    private int recentAudioBytes;
+    private const int RecentAudioMaxBytes = 32000; // ~1 segundo em PCM 16kHz mono 16-bit
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
@@ -163,6 +166,8 @@ public sealed class VoiceService : IDisposable
 
         commandPcm?.Dispose();
         commandPcm = null;
+        recentAudio.Clear();
+        recentAudioBytes = 0;
         whisperBusy = false;
         waveIn = null;
         StatusChanged?.Invoke("Voz desativada");
@@ -281,6 +286,8 @@ public sealed class VoiceService : IDisposable
         {
             try
             {
+                BufferRecentAudio(e.Buffer, e.BytesRecorded);
+
                 if (whisperBusy)
                     return;
 
@@ -370,6 +377,23 @@ public sealed class VoiceService : IDisposable
 
         var normalized = Normalize(text);
 
+        // No recognizer principal de wake, "eme" é a parte que o Vosk
+        // reconhece de forma consistente para "MS". Como esse recognizer usa
+        // gramática extremamente restrita, um "eme" final já é suficiente
+        // para ativar. Isso evita esperar "esse", que no microfone real do
+        // usuário quase nunca chega como resultado separado.
+        if (!commandMode && !isPartial &&
+            (normalized == "eme" || normalized == "em" || normalized == "m"))
+        {
+            wakeSequenceArmed = false;
+            PlayActivationTone();
+            DiagnosticLog?.Invoke($"[WAKE WORD] MS confirmado pelo primeiro fonema: \"{text}\"");
+            DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
+            StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
+            BeginWhisperCommandCapture(includeRecentAudio: false);
+            return;
+        }
+
         if (!commandMode && TryHandleWakeSequence(normalized, isPartial))
             return;
 
@@ -435,7 +459,23 @@ public sealed class VoiceService : IDisposable
         CommandRecognized?.Invoke(command);
     }
 
-    private void BeginWhisperCommandCapture()
+    private void BufferRecentAudio(byte[] buffer, int bytesRecorded)
+    {
+        if (bytesRecorded <= 0) return;
+
+        var copy = new byte[bytesRecorded];
+        Buffer.BlockCopy(buffer, 0, copy, 0, bytesRecorded);
+        recentAudio.Enqueue(copy);
+        recentAudioBytes += bytesRecorded;
+
+        while (recentAudioBytes > RecentAudioMaxBytes && recentAudio.Count > 0)
+        {
+            var old = recentAudio.Dequeue();
+            recentAudioBytes -= old.Length;
+        }
+    }
+
+    private void BeginWhisperCommandCapture(bool includeRecentAudio = false)
     {
         commandMode = true;
         commandStartedAt = DateTime.Now;
@@ -444,6 +484,12 @@ public sealed class VoiceService : IDisposable
 
         commandPcm?.Dispose();
         commandPcm = new MemoryStream(capacity: 32000 * 8);
+
+        if (includeRecentAudio && recentAudio.Count > 0)
+        {
+            foreach (var chunk in recentAudio)
+                commandPcm.Write(chunk, 0, chunk.Length);
+        }
 
         // Durante o comando o Vosk sai completamente do caminho. Apenas o PCM
         // cru é coletado para o Whisper.
@@ -669,7 +715,7 @@ public sealed class VoiceService : IDisposable
             DiagnosticLog?.Invoke($"[WAKE SEQUENCE] MS confirmado por sequência: \"{normalized}\"");
             DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
             StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-            BeginWhisperCommandCapture();
+            BeginWhisperCommandCapture(includeRecentAudio: true);
             return true;
         }
 
