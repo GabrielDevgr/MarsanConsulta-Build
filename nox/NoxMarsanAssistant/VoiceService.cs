@@ -24,6 +24,8 @@ public sealed class VoiceService : IDisposable
     private bool running;
     private bool commandMode;
     private DateTime commandStartedAt = DateTime.MinValue;
+    private string lastWaitingTranscript = "";
+    private DateTime lastWaitingLogAt = DateTime.MinValue;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
@@ -253,21 +255,36 @@ public sealed class VoiceService : IDisposable
 
         if (!commandMode)
         {
-            if (ContainsWakeWord(normalized))
+            var wakeToken = FindWakeToken(normalized);
+
+            if (wakeToken is not null)
             {
+                if (!isPartial)
+                {
+                    var inlineCommand = RemoveWakeToken(normalized, wakeToken);
+                    if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
+                    {
+                        SystemSounds.Asterisk.Play();
+                        StatusChanged?.Invoke($"MARSAN ativado • ouvi: {inlineCommand}");
+                        CommandRecognized?.Invoke(inlineCommand);
+                        ResetRecognizer(wakeOnly: true);
+                        return;
+                    }
+                }
+
                 commandMode = true;
                 commandStartedAt = DateTime.Now;
 
                 SystemSounds.Asterisk.Play();
                 StatusChanged?.Invoke("MARSAN ativado • ouvindo comando...");
-
                 ResetRecognizer(wakeOnly: false);
             }
-            else if (!isPartial)
+            else
             {
-                HeardWhileWaiting?.Invoke(text);
+                if (ShouldReportWaitingTranscript(text, isPartial))
+                    HeardWhileWaiting?.Invoke(text);
 
-                if (LooksLikeDirectCommand(normalized))
+                if (!isPartial && LooksLikeDirectCommand(normalized))
                 {
                     StatusChanged?.Invoke($"Comando direto detectado: {text}");
                     CommandRecognized?.Invoke(text.Trim());
@@ -332,18 +349,113 @@ public sealed class VoiceService : IDisposable
             value.StartsWith(p + " ", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool ContainsWakeWord(string value)
+    private string? FindWakeToken(string value)
     {
-        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (string.IsNullOrWhiteSpace(value)) return null;
 
         var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        // "Marsan" costuma soar como "marçam" e pode ser transcrito de formas parecidas.
-        if (tokens.Length <= 3 &&
-            tokens.Any(t => t is "marsan" or "marsam" or "marcan" or "marcam" or "marsa" or "marssan"))
+        foreach (var token in tokens)
+        {
+            if (IsWakeToken(token))
+                return token;
+        }
+
+        return null;
+    }
+
+    private static bool IsWakeToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return false;
+
+        var exact = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // MARSAN / "marçam"
+            "marsan", "marsam", "marcan", "marcam", "marssan", "massan",
+            "marsa", "marson", "marsem", "marsen", "marcal", "marcao",
+            "macao", "maca",
+
+            // Compatibilidade com a wake word antiga NOX
+            "nox", "nocs", "nocks", "noques", "noz", "nos", "nois", "noxx"
+        };
+
+        if (exact.Contains(token))
             return true;
 
-        return tokens.Any(t => t is "marsan" or "marsam" or "marcan" or "marcam");
+        // Tolerância para o Vosk variar uma ou duas letras em nomes próprios.
+        if (token.Length >= 4 && token.Length <= 8 &&
+            LevenshteinDistance(token, "marsan") <= 2)
+            return true;
+
+        if (token.Length >= 2 && token.Length <= 5 &&
+            LevenshteinDistance(token, "nox") <= 1)
+            return true;
+
+        return false;
+    }
+
+    private static string RemoveWakeToken(string value, string wakeToken)
+    {
+        var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var index = tokens.FindIndex(t => t.Equals(wakeToken, StringComparison.OrdinalIgnoreCase));
+
+        if (index >= 0)
+            tokens.RemoveAt(index);
+
+        return string.Join(" ", tokens).Trim();
+    }
+
+    private bool ShouldReportWaitingTranscript(string text, bool isPartial)
+    {
+        var normalized = Normalize(text);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        if (!isPartial)
+        {
+            lastWaitingTranscript = normalized;
+            lastWaitingLogAt = DateTime.Now;
+            return true;
+        }
+
+        if (normalized.Equals(lastWaitingTranscript, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (DateTime.Now - lastWaitingLogAt < TimeSpan.FromMilliseconds(700))
+            return false;
+
+        lastWaitingTranscript = normalized;
+        lastWaitingLogAt = DateTime.Now;
+        return true;
+    }
+
+    private static int LevenshteinDistance(string a, string b)
+    {
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+
+        var previous = new int[b.Length + 1];
+        var current = new int[b.Length + 1];
+
+        for (var j = 0; j <= b.Length; j++)
+            previous[j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            current[0] = i;
+
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                current[j] = Math.Min(
+                    Math.Min(current[j - 1] + 1, previous[j] + 1),
+                    previous[j - 1] + cost);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[b.Length];
     }
 
     private static string Normalize(string value)
