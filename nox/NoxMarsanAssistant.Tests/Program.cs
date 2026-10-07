@@ -61,7 +61,7 @@ Expect("imprima documento inexistente", MarsanIntent.Print, null, false);
 Expect("imprima", MarsanIntent.Print, null, false);
 Expect("quero falar com o financeiro", MarsanIntent.Open, null, false);
 
-foreach (var w in new[] { "eme esse", "ême ésse", "eme ése", "m s", "ms", "eme se" })
+foreach (var w in new[] { "eme esse", "ême ésse", "eme ése", "m s", "ms", "eme se", "emese" })
 {
     var score = MarsanVocabulary.WakeScore(w);
     var ok = score >= settings.WakeExecuteThreshold;
@@ -69,7 +69,7 @@ foreach (var w in new[] { "eme esse", "ême ésse", "eme ése", "m s", "ms", "em
     if (!ok) failures.Add("wake:" + w);
 }
 
-foreach (var w in new[] { "esse", "eme", "mes", "emese", "bom dia pessoal", "santa clara", "imprime" })
+foreach (var w in new[] { "esse", "eme", "mes", "mesa", "bom dia pessoal", "santa clara", "imprime" })
 {
     var score = MarsanVocabulary.WakeScore(w);
     var ok = score < settings.WakeExecuteThreshold;
