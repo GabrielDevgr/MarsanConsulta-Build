@@ -27,7 +27,8 @@ public sealed class VoiceService : IDisposable
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
-    public event Action<string>? ErrorOccurred;\n    public event Action<string>? HeardWhileWaiting;
+    public event Action<string>? ErrorOccurred;
+    public event Action<string>? HeardWhileWaiting;
 
     public bool IsRunning => running;
     public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
