@@ -64,6 +64,11 @@ public sealed class MainForm : Form
             Log("VOZ", s);
         });
 
+        voice.HeardWhileWaiting += s => Ui(() =>
+        {
+            Log("ESCUTA", $"Ouvi enquanto aguardava NOX: {s}");
+        });
+
         voice.CommandRecognized += text => Ui(async () =>
         {
             command.Text = text;
@@ -116,7 +121,7 @@ public sealed class MainForm : Form
         var logo = new Label { Text = "N", ForeColor = Green, BackColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(24, 22, 52, 52) };
         var title = new Label { Text = "NOX", ForeColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = true, Left = 92, Top = 18 };
         var sub = new Label { Text = "Marsan Assistant", ForeColor = Color.FromArgb(205, 224, 213), Font = new Font("Segoe UI", 11), AutoSize = true, Left = 95, Top = 56 };
-        var badge = new Label { Text = "v0.3.0", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
+        var badge = new Label { Text = "v0.3.2", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
         header.Controls.AddRange(new Control[] { logo, title, sub, badge });
         Controls.Add(header);
 
