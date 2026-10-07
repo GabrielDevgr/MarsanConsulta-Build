@@ -187,7 +187,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.6.1", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "v0.6.2", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -690,8 +690,8 @@ public sealed class MainForm : Form
         if (voice.IsRunning)
         {
             voiceToggle.Text = "Desativar voz";
-            voiceStatus.Text = "Aguardando “MARSAN”...";
-            assistantStatus.Text = "Aguardando “MARSAN”...";
+            voiceStatus.Text = "Aguardando “MS” (ême ésse)...";
+            assistantStatus.Text = "Aguardando “MS” (ême ésse)...";
             Log("VOZ", $"Escuta ativada com {voice.RecognizerName}.");
         }
         else
@@ -785,7 +785,7 @@ public sealed class MainForm : Form
             e.Cancel = true;
             Hide();
             tray.ShowBalloonTip(1500, "MARSAN", voice.IsRunning
-                ? "Continuo ativo e aguardando a palavra MARSAN."
+                ? "Continuo ativo e aguardando a palavra MS."
                 : "Continuo ativo na bandeja do Windows.", ToolTipIcon.Info);
             return;
         }
