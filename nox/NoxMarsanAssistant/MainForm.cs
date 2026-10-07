@@ -37,7 +37,7 @@ public sealed class MainForm : Form
     private static readonly Color Green = Color.FromArgb(29, 111, 79);
     private static readonly Color GreenDark = Color.FromArgb(18, 72, 51);
     private static readonly Color Gold = Color.FromArgb(194, 159, 92);
-    private static readonly Color Text = Color.FromArgb(28, 35, 31);
+    private static readonly Color TextColor = Color.FromArgb(28, 35, 31);
     private static readonly Color Muted = Color.FromArgb(105, 116, 109);
     private static readonly Color Border = Color.FromArgb(222, 228, 224);
     private static readonly Color Card = Color.White;
@@ -188,7 +188,7 @@ public sealed class MainForm : Form
             Name = "pageTitle",
             Text = "Assistente",
             AutoSize = true,
-            ForeColor = Text,
+            ForeColor = TextColor,
             Font = new Font("Segoe UI Semibold", 15, FontStyle.Bold),
             Left = 28,
             Top = 22
@@ -324,7 +324,7 @@ public sealed class MainForm : Form
         hero.Controls.AddRange(new Control[] { assistantStatus, voiceToggle });
 
         var cmdCard = new RoundedPanel { Left = 0, Top = 205, Width = 820, Height = 145, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-        cmdCard.Controls.Add(new Label { Text = "Comando", Left = 24, Top = 19, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+        cmdCard.Controls.Add(new Label { Text = "Comando", Left = 24, Top = 19, AutoSize = true, ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
 
         command.Left = 24;
         command.Top = 55;
@@ -349,7 +349,7 @@ public sealed class MainForm : Form
         cmdCard.Controls.AddRange(new Control[] { command, run });
 
         var logCard = new RoundedPanel { Left = 0, Top = 370, Width = 820, Height = 265, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
-        logCard.Controls.Add(new Label { Text = "Atividade recente", Left = 24, Top = 18, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+        logCard.Controls.Add(new Label { Text = "Atividade recente", Left = 24, Top = 18, AutoSize = true, ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
 
         output.Left = 24;
         output.Top = 52;
@@ -461,7 +461,7 @@ public sealed class MainForm : Form
     private RoundedPanel CreateCard(string title, int x, int y, int w, int h)
     {
         var p = new RoundedPanel { Left = x, Top = y, Width = w, Height = h, BackColor = Card, Radius = 18 };
-        p.Controls.Add(new Label { Text = title, Left = 24, Top = 20, AutoSize = true, ForeColor = Text, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+        p.Controls.Add(new Label { Text = title, Left = 24, Top = 20, AutoSize = true, ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
         return p;
     }
 
@@ -482,7 +482,7 @@ public sealed class MainForm : Form
             b.FlatStyle = FlatStyle.Flat;
             b.FlatAppearance.BorderColor = Border;
             b.BackColor = Color.White;
-            b.ForeColor = Text;
+            b.ForeColor = TextColor;
         }
         return b;
     }
