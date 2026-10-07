@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
+using System.Text.RegularExpressions;
 
 namespace NoxMarsanAssistant;
 
@@ -34,6 +35,23 @@ public sealed class MainForm : Form
     private readonly Panel contentHost = new();
     private readonly Dictionary<string, Button> navButtons = new();
 
+    // Dashboard principal
+    private readonly Label heroTitle = new();
+    private readonly Label heroSubtitle = new();
+    private readonly Label heroMeta = new();
+    private readonly Label heroBadge = new();
+    private readonly Label lastCommandValue = new();
+    private readonly Label lastCommandMeta = new();
+    private readonly Label queueValue = new();
+    private readonly Label queueMeta = new();
+    private readonly Label nextActionValue = new();
+    private readonly Label nextActionMeta = new();
+    private readonly Label groqChipValue = new();
+    private readonly Label printChipValue = new();
+    private readonly Label wakeChipValue = new();
+    private string lastTarget = "";
+    private DateTime? lastTargetAt;
+
     private string currentPage = "assistant";
     private string currentAgentStatus = "Parado";
     private bool reallyExit;
@@ -48,12 +66,19 @@ public sealed class MainForm : Form
     private static readonly Color Muted = Color.FromArgb(105, 116, 109);
     private static readonly Color Border = Color.FromArgb(222, 228, 224);
     private static readonly Color Card = Color.White;
+    private static readonly Color Hero = Color.FromArgb(7, 74, 52);
+    private static readonly Color Hero2 = Color.FromArgb(4, 54, 39);
+    private static readonly Color Accent = Color.FromArgb(29, 200, 116);
+    private static readonly Color SoftGreen = Color.FromArgb(235, 250, 242);
+    private static readonly Color SoftBlue = Color.FromArgb(238, 247, 255);
+    private static readonly Color SoftAmber = Color.FromArgb(255, 247, 232);
+    private static readonly Color ConsoleBg = Color.FromArgb(8, 31, 29);
 
     public MainForm()
     {
         Text = "MARSAN Assistant";
-        ClientSize = new Size(1120, 720);
-        MinimumSize = new Size(980, 640);
+        ClientSize = new Size(1320, 850);
+        MinimumSize = new Size(1120, 720);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
@@ -68,6 +93,7 @@ public sealed class MainForm : Form
         {
             currentAgentStatus = s;
             agentStatus.Text = s;
+            UpdateDashboardFromPrintStatus(s);
             Log("PRINT", s);
         });
 
@@ -75,12 +101,15 @@ public sealed class MainForm : Form
         {
             voiceStatus.Text = s;
             assistantStatus.Text = s;
+            UpdateDashboardFromVoiceStatus(s);
         });
 
         voice.ErrorOccurred += s => Ui(() =>
         {
             voiceStatus.Text = "Erro de voz";
             assistantStatus.Text = "Erro no reconhecimento";
+            groqChipValue.Text = "Erro";
+            SetHeroState("Erro no reconhecimento", "Não foi possível processar o áudio.", s, "ERRO");
             Log("VOZ", s);
         });
 
@@ -146,49 +175,59 @@ public sealed class MainForm : Form
         var sidebar = new Panel
         {
             Dock = DockStyle.Left,
-            Width = 230,
+            Width = 260,
             BackColor = Sidebar,
-            Padding = new Padding(18, 18, 18, 18)
+            Padding = new Padding(22, 20, 22, 18)
         };
 
-        var brand = new Panel { Dock = DockStyle.Top, Height = 110, BackColor = Sidebar };
-        var logo = new RoundedPanel { Left = 0, Top = 5, Width = 54, Height = 54, BackColor = Green, Radius = 16 };
+        var brand = new Panel { Dock = DockStyle.Top, Height = 150, BackColor = Sidebar };
+        var logo = new RoundedPanel
+        {
+            Left = 22,
+            Top = 10,
+            Width = 66,
+            Height = 66,
+            BackColor = Green,
+            Radius = 20
+        };
         logo.Controls.Add(new Label
         {
             Text = "M",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             ForeColor = Color.White,
-            Font = new Font("Segoe UI", 22, FontStyle.Bold)
+            Font = new Font("Segoe UI", 28, FontStyle.Bold)
         });
 
         brand.Controls.AddRange(new Control[]
         {
             logo,
-            new Label { Text = "MARSAN", Left = 68, Top = 8, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 18, FontStyle.Bold) },
-            new Label { Text = "ASSISTANT", Left = 70, Top = 43, AutoSize = true, ForeColor = Color.FromArgb(149, 181, 165), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) }
+            new Label { Text = "MARSAN", Left = 22, Top = 84, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 21, FontStyle.Bold) },
+            new Label { Text = "A S S I S T A N T", Left = 24, Top = 119, AutoSize = true, ForeColor = Color.FromArgb(156, 193, 174), Font = new Font("Segoe UI", 8.7f, FontStyle.Bold) }
         });
 
         var nav = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 315,
+            Height = 350,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             BackColor = Sidebar,
-            Padding = new Padding(0, 12, 0, 0)
+            Padding = new Padding(0, 18, 0, 0)
         };
 
-        nav.Controls.Add(CreateNavButton("assistant", "✦   Assistente"));
+        nav.Controls.Add(CreateNavButton("assistant", "▥   Assistente"));
         nav.Controls.Add(CreateNavButton("print", "▣   Impressão"));
         nav.Controls.Add(CreateNavButton("training", "◉   Treinamento"));
         nav.Controls.Add(CreateNavButton("settings", "⚙   Configurações"));
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 74, BackColor = Sidebar };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 138, BackColor = Sidebar };
         footer.Controls.AddRange(new Control[]
         {
-            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.11.2", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 20, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
+            new Label { Text = "Soluções em madeira para\num futuro sustentável.", Left = 2, Top = 47, Width = 210, Height = 44, ForeColor = Color.FromArgb(161, 188, 175), Font = new Font("Segoe UI", 8.5f) },
+            new Label { Text = "v0.12.0", Left = 2, Top = 105, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
+            new Label { Text = "●  Assistente ativo", Left = 104, Top = 104, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -198,9 +237,9 @@ public sealed class MainForm : Form
         var topbar = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 72,
+            Height = 82,
             BackColor = Card,
-            Padding = new Padding(28, 0, 28, 0)
+            Padding = new Padding(32, 0, 32, 0)
         };
         topbar.Paint += (_, e) =>
         {
@@ -214,27 +253,27 @@ public sealed class MainForm : Form
             Text = "Assistente",
             AutoSize = true,
             ForeColor = TextColor,
-            Font = new Font("Segoe UI Semibold", 15, FontStyle.Bold),
-            Left = 28,
-            Top = 22
+            Font = new Font("Segoe UI Semibold", 18, FontStyle.Bold),
+            Left = 32,
+            Top = 16
         };
 
-        var system = new Label
+        var pageSubtitle = new Label
         {
-            Text = "●  Sistema ativo",
+            Name = "pageSubtitle",
+            Text = "Comandos por voz e automações da Marsan Madeiras.",
             AutoSize = true,
-            ForeColor = Green,
-            Font = new Font("Segoe UI Semibold", 9),
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            Left = 735,
-            Top = 26
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 9.8f),
+            Left = 34,
+            Top = 49
         };
 
-        topbar.Controls.AddRange(new Control[] { pageTitle, system });
+        topbar.Controls.AddRange(new Control[] { pageTitle, pageSubtitle });
 
         contentHost.Dock = DockStyle.Fill;
         contentHost.BackColor = Bg;
-        contentHost.Padding = new Padding(28);
+        contentHost.Padding = new Padding(26, 22, 26, 22);
 
         Controls.Add(contentHost);
         Controls.Add(topbar);
@@ -246,18 +285,19 @@ public sealed class MainForm : Form
         var b = new Button
         {
             Text = text,
-            Width = 194,
-            Height = 48,
-            Margin = new Padding(0, 0, 0, 8),
+            Width = 216,
+            Height = 58,
+            Margin = new Padding(0, 0, 0, 10),
             FlatStyle = FlatStyle.Flat,
             BackColor = Sidebar,
-            ForeColor = Color.FromArgb(205, 220, 212),
+            ForeColor = Color.FromArgb(211, 226, 218),
             TextAlign = ContentAlignment.MiddleLeft,
-            Font = new Font("Segoe UI Semibold", 10.2f),
-            Padding = new Padding(14, 0, 0, 0),
+            Font = new Font("Segoe UI Semibold", 10.6f),
+            Padding = new Padding(18, 0, 0, 0),
             Cursor = Cursors.Hand
         };
         b.FlatAppearance.BorderSize = 0;
+        b.FlatAppearance.MouseDownBackColor = GreenDark;
         b.MouseEnter += (_, _) => { if (currentPage != key) b.BackColor = SidebarHover; };
         b.MouseLeave += (_, _) => { if (currentPage != key) b.BackColor = Sidebar; };
         b.Click += (_, _) => ShowPage(key);
@@ -286,6 +326,7 @@ public sealed class MainForm : Form
         contentHost.Controls.Add(body);
 
         var title = Controls.Find("pageTitle", true).FirstOrDefault() as Label;
+        var subtitle = Controls.Find("pageSubtitle", true).FirstOrDefault() as Label;
         if (title is not null)
             title.Text = page switch
             {
@@ -294,106 +335,349 @@ public sealed class MainForm : Form
                 "settings" => "Configurações",
                 _ => "Assistente"
             };
+        if (subtitle is not null)
+            subtitle.Text = page switch
+            {
+                "print" => "Fila, impressora e processamento de documentos.",
+                "training" => "Pronúncias e vocabulário local do assistente.",
+                "settings" => "Integrações, APIs e comportamento do sistema.",
+                _ => "Comandos por voz e automações da Marsan Madeiras."
+            };
     }
 
     private Control BuildAssistantPage()
     {
-        var root = new Panel { BackColor = Bg };
+        var root = new Panel { BackColor = Bg, AutoScroll = true };
 
-        var hero = new RoundedPanel { Left = 0, Top = 0, Width = 820, Height = 185, BackColor = Sidebar, Radius = 22 };
-        hero.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-
-        hero.Controls.Add(new Label
+        var statusStrip = new Panel
         {
-            Text = "MARSAN Assistant",
-            Left = 28,
-            Top = 25,
-            AutoSize = true,
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold)
-        });
-        hero.Controls.Add(new Label
-        {
-            Text = "Assistente local para impressão e automações da Marsan Madeiras.",
-            Left = 30,
-            Top = 68,
-            AutoSize = true,
-            ForeColor = Color.FromArgb(190, 211, 200),
-            Font = new Font("Segoe UI", 10.5f)
-        });
-
-        assistantStatus.Text = "Pronto para receber comandos";
-        assistantStatus.Left = 50;
-        assistantStatus.Top = 116;
-        assistantStatus.AutoSize = true;
-        assistantStatus.ForeColor = Color.FromArgb(213, 231, 222);
-        assistantStatus.Font = new Font("Segoe UI Semibold", 10);
-
-        hero.Controls.Add(new Label
-        {
-            Text = "●",
-            Left = 28,
-            Top = 111,
-            AutoSize = true,
-            ForeColor = Color.FromArgb(73, 211, 136),
-            Font = new Font("Segoe UI", 12, FontStyle.Bold)
-        });
-
-        voiceToggle.Text = "Ativar voz";
-        voiceToggle.Width = 145;
-        voiceToggle.Height = 40;
-        voiceToggle.Left = 645;
-        voiceToggle.Top = 111;
-        voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        StylePrimaryButton(voiceToggle);
-        voiceToggle.Click += (_, _) => ToggleVoice();
-
-        hero.Controls.AddRange(new Control[] { assistantStatus, voiceToggle });
-
-        var cmdCard = new RoundedPanel { Left = 0, Top = 205, Width = 820, Height = 145, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-        cmdCard.Controls.Add(new Label { Text = "Comando", Left = 24, Top = 19, AutoSize = true, ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
-
-        command.Left = 24;
-        command.Top = 55;
-        command.Width = 630;
-        command.Height = 36;
-        command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        command.Font = new Font("Segoe UI", 11);
-        command.PlaceholderText = "Ex.: imprima Santa Clara";
-        command.KeyDown += async (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.SuppressKeyPress = true;
-                await ExecuteCommandTextAsync(command.Text.Trim(), false);
-            }
+            Left = 0,
+            Top = 0,
+            Width = 1000,
+            Height = 64,
+            BackColor = Bg,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
 
-        var run = new Button { Text = "Executar", Left = 670, Top = 54, Width = 120, Height = 38, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        var chip1 = CreateStatusChip("🎙", "Groq STT", groqChipValue, 0);
+        var chip2 = CreateStatusChip("▣", "Print Agent", printChipValue, 178);
+        var chip3 = CreateStatusChip("◉", "Wake Word: Grok", wakeChipValue, 356);
+        groqChipValue.Text = string.IsNullOrWhiteSpace(cfg.GroqApiKey) ? "Não configurado" : "Online";
+        printChipValue.Text = currentAgentStatus.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase) ? "Conectado" : currentAgentStatus;
+        wakeChipValue.Text = voice.IsRunning ? "Ativo" : "Inativo";
+        statusStrip.Controls.AddRange(new Control[] { chip1, chip2, chip3 });
+
+        var hero = new RoundedPanel
+        {
+            Left = 0,
+            Top = 72,
+            Width = 1000,
+            Height = 182,
+            BackColor = Hero,
+            Radius = 22,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        hero.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var brush = new LinearGradientBrush(hero.ClientRectangle, Hero, Hero2, 0f);
+            e.Graphics.FillRectangle(brush, hero.ClientRectangle);
+        };
+
+        var printerCircle = new RoundedPanel
+        {
+            Left = 28,
+            Top = 43,
+            Width = 86,
+            Height = 86,
+            BackColor = Green,
+            Radius = 43
+        };
+        printerCircle.Controls.Add(new Label
+        {
+            Text = "▣",
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI Symbol", 30, FontStyle.Bold)
+        });
+
+        hero.Controls.Add(new Label
+        {
+            Text = "●  ASSISTENTE ATIVO",
+            Left = 30,
+            Top = 17,
+            AutoSize = true,
+            ForeColor = Accent,
+            Font = new Font("Segoe UI Semibold", 9.4f, FontStyle.Bold)
+        });
+
+        heroTitle.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Pronto para receber comandos" : $"Imprimindo {lastTarget}";
+        heroTitle.SetBounds(138, 46, 630, 46);
+        heroTitle.ForeColor = Color.White;
+        heroTitle.Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold);
+        heroTitle.AutoEllipsis = true;
+
+        heroSubtitle.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Diga “Grok” e fale o nome da planilha." : "Planilha identificada com sucesso";
+        heroSubtitle.SetBounds(140, 93, 590, 30);
+        heroSubtitle.ForeColor = Color.FromArgb(227, 242, 235);
+        heroSubtitle.Font = new Font("Segoe UI Semibold", 12.2f);
+
+        heroMeta.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Groq Whisper Large V3 • Print Agent integrado" : "Comando processado • aguardando impressão...";
+        heroMeta.SetBounds(140, 126, 620, 26);
+        heroMeta.ForeColor = Color.FromArgb(173, 207, 191);
+        heroMeta.Font = new Font("Segoe UI", 9.5f);
+
+        heroBadge.Text = "AGUARDANDO";
+        heroBadge.SetBounds(790, 66, 175, 48);
+        heroBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        heroBadge.TextAlign = ContentAlignment.MiddleCenter;
+        heroBadge.ForeColor = Color.White;
+        heroBadge.BackColor = Green;
+        heroBadge.Font = new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold);
+
+        hero.Controls.AddRange(new Control[] { printerCircle, heroTitle, heroSubtitle, heroMeta, heroBadge, voiceToggle });
+
+        voiceToggle.Text = voice.IsRunning ? "Desativar voz" : "Ativar voz";
+        voiceToggle.SetBounds(790, 124, 175, 36);
+        voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        StylePrimaryButton(voiceToggle);
+        voiceToggle.Click -= VoiceToggleClick;
+        voiceToggle.Click += VoiceToggleClick;
+
+        var lastCard = CreateMetricCard("Último comando entendido", "▤", SoftGreen, 0, 272, 322, 118);
+        lastCommandValue.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Nenhum comando" : lastTarget;
+        lastCommandValue.SetBounds(84, 46, 215, 28);
+        lastCommandValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
+        lastCommandValue.ForeColor = TextColor;
+        lastCommandValue.AutoEllipsis = true;
+        lastCommandMeta.Text = lastTargetAt.HasValue ? $"Identificada via voz • {lastTargetAt:HH:mm:ss}" : "Aguardando reconhecimento";
+        lastCommandMeta.SetBounds(84, 78, 220, 22);
+        lastCommandMeta.ForeColor = Muted;
+        lastCommandMeta.Font = new Font("Segoe UI", 8.8f);
+        lastCard.Controls.AddRange(new Control[] { lastCommandValue, lastCommandMeta });
+
+        var queueCard = CreateMetricCard("Fila de impressão", "▣", SoftBlue, 339, 272, 322, 118);
+        queueValue.Text = currentAgentStatus.Contains("pendente", StringComparison.OrdinalIgnoreCase) ? ExtractPendingText(currentAgentStatus) : "0 pendentes";
+        queueValue.SetBounds(84, 46, 215, 28);
+        queueValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
+        queueValue.ForeColor = TextColor;
+        queueMeta.Text = printService.IsRunning ? "Print Agent conectado" : "Agente parado";
+        queueMeta.SetBounds(84, 78, 220, 22);
+        queueMeta.ForeColor = Muted;
+        queueMeta.Font = new Font("Segoe UI", 8.8f);
+        queueCard.Controls.AddRange(new Control[] { queueValue, queueMeta });
+
+        var nextCard = CreateMetricCard("Próxima ação", "◷", SoftAmber, 678, 272, 322, 118);
+        nextActionValue.Text = "Aguardando comando";
+        nextActionValue.SetBounds(84, 46, 215, 28);
+        nextActionValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
+        nextActionValue.ForeColor = TextColor;
+        nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
+        nextActionMeta.SetBounds(84, 78, 220, 22);
+        nextActionMeta.ForeColor = Muted;
+        nextActionMeta.Font = new Font("Segoe UI", 8.8f);
+        nextCard.Controls.AddRange(new Control[] { nextActionValue, nextActionMeta });
+
+        var cmdCard = new RoundedPanel
+        {
+            Left = 0,
+            Top = 408,
+            Width = 1000,
+            Height = 112,
+            BackColor = Card,
+            Radius = 18,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        cmdCard.Controls.Add(new Label
+        {
+            Text = "Comando de voz ou manual",
+            Left = 24,
+            Top = 16,
+            AutoSize = true,
+            ForeColor = TextColor,
+            Font = new Font("Segoe UI Semibold", 10.8f, FontStyle.Bold)
+        });
+
+        command.SetBounds(24, 50, 760, 40);
+        command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        command.Font = new Font("Segoe UI", 11);
+        command.PlaceholderText = "Ex.: Serragem Gelenski ou Toras Aza";
+        command.KeyDown -= CommandKeyDown;
+        command.KeyDown += CommandKeyDown;
+
+        var run = new Button
+        {
+            Text = "▶  Executar comando",
+            Left = 802,
+            Top = 48,
+            Width = 174,
+            Height = 42,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
         StylePrimaryButton(run);
         run.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
-
         cmdCard.Controls.AddRange(new Control[] { command, run });
 
-        var logCard = new RoundedPanel { Left = 0, Top = 370, Width = 820, Height = 265, BackColor = Card, Radius = 18, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
-        logCard.Controls.Add(new Label { Text = "Atividade recente", Left = 24, Top = 18, AutoSize = true, ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold) });
+        var logCard = new RoundedPanel
+        {
+            Left = 0,
+            Top = 538,
+            Width = 1000,
+            Height = 260,
+            BackColor = Card,
+            Radius = 18,
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
+        };
+        logCard.Controls.Add(new Label
+        {
+            Text = "Atividade recente",
+            Left = 24,
+            Top = 16,
+            AutoSize = true,
+            ForeColor = TextColor,
+            Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold)
+        });
+        logCard.Controls.Add(new Label
+        {
+            Text = "Reconhecimento, ações e status do sistema em tempo real.",
+            Left = 24,
+            Top = 40,
+            AutoSize = true,
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 8.8f)
+        });
 
-        output.Left = 24;
-        output.Top = 52;
-        output.Width = 772;
-        output.Height = 185;
+        var clear = new Button
+        {
+            Text = "Limpar logs",
+            Left = 865,
+            Top = 18,
+            Width = 110,
+            Height = 32,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.White,
+            ForeColor = TextColor
+        };
+        clear.FlatAppearance.BorderColor = Border;
+        clear.Click += (_, _) => output.Clear();
+
+        output.SetBounds(24, 70, 952, 166);
         output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         output.Multiline = true;
         output.ReadOnly = true;
         output.ScrollBars = ScrollBars.Vertical;
         output.BorderStyle = BorderStyle.None;
-        output.BackColor = Color.FromArgb(248, 250, 249);
-        output.ForeColor = TextColor;
-        output.Font = new Font("Consolas", 9.2f);
+        output.BackColor = ConsoleBg;
+        output.ForeColor = Color.FromArgb(219, 238, 229);
+        output.Font = new Font("Consolas", 9.1f);
 
-        logCard.Controls.Add(output);
-        root.Controls.AddRange(new Control[] { hero, cmdCard, logCard });
+        logCard.Controls.AddRange(new Control[] { clear, output });
+
+        root.Controls.AddRange(new Control[]
+        {
+            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, logCard
+        });
+
+        void LayoutDashboard()
+        {
+            var w = Math.Max(840, root.ClientSize.Width - 4);
+            statusStrip.Width = w;
+            hero.Width = w;
+            cmdCard.Width = w;
+            logCard.Width = w;
+
+            var gap = 16;
+            var cardW = (w - gap * 2) / 3;
+            lastCard.Width = cardW;
+            queueCard.Left = cardW + gap;
+            queueCard.Width = cardW;
+            nextCard.Left = (cardW + gap) * 2;
+            nextCard.Width = w - nextCard.Left;
+
+            chip1.Left = Math.Max(0, w - 534);
+            chip2.Left = Math.Max(178, w - 356);
+            chip3.Left = Math.Max(356, w - 178);
+        }
+
+        root.Resize += (_, _) => LayoutDashboard();
+        LayoutDashboard();
         return root;
+    }
+
+    private RoundedPanel CreateStatusChip(string icon, string title, Label value, int x)
+    {
+        var p = new RoundedPanel
+        {
+            Left = x,
+            Top = 5,
+            Width = 166,
+            Height = 54,
+            BackColor = Color.FromArgb(247, 250, 248),
+            Radius = 15
+        };
+        p.Controls.Add(new Label
+        {
+            Text = icon,
+            Left = 14,
+            Top = 13,
+            Width = 28,
+            Height = 28,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = GreenDark,
+            Font = new Font("Segoe UI Symbol", 14, FontStyle.Bold)
+        });
+        p.Controls.Add(new Label
+        {
+            Text = title,
+            Left = 48,
+            Top = 9,
+            Width = 108,
+            Height = 20,
+            ForeColor = TextColor,
+            Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold)
+        });
+        value.SetBounds(48, 29, 108, 18);
+        value.ForeColor = Green;
+        value.Font = new Font("Segoe UI Semibold", 8.3f);
+        p.Controls.Add(value);
+        return p;
+    }
+
+    private RoundedPanel CreateMetricCard(string title, string icon, Color back, int x, int y, int w, int h)
+    {
+        var p = new RoundedPanel { Left = x, Top = y, Width = w, Height = h, BackColor = back, Radius = 18 };
+        var iconBox = new RoundedPanel { Left = 18, Top = 30, Width = 52, Height = 52, BackColor = Color.FromArgb(220, Green), Radius = 26 };
+        iconBox.Controls.Add(new Label
+        {
+            Text = icon,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = GreenDark,
+            Font = new Font("Segoe UI Symbol", 17, FontStyle.Bold)
+        });
+        p.Controls.Add(iconBox);
+        p.Controls.Add(new Label
+        {
+            Text = title,
+            Left = 84,
+            Top = 20,
+            Width = 220,
+            Height = 23,
+            ForeColor = TextColor,
+            Font = new Font("Segoe UI", 9.2f)
+        });
+        return p;
+    }
+
+    private void VoiceToggleClick(object? sender, EventArgs e) => ToggleVoice();
+
+    private async void CommandKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode != Keys.Enter) return;
+        e.SuppressKeyPress = true;
+        await ExecuteCommandTextAsync(command.Text.Trim(), false);
     }
 
     private Control BuildPrintPage()
@@ -700,6 +984,10 @@ public sealed class MainForm : Form
             voiceToggle.Text = "Desativar voz";
             voiceStatus.Text = "Aguardando “Grok”...";
             assistantStatus.Text = "Aguardando “Grok”...";
+            wakeChipValue.Text = "Ativo";
+            groqChipValue.Text = string.IsNullOrWhiteSpace(cfg.GroqApiKey) ? "Não configurado" : "Online";
+            nextActionValue.Text = "Aguardando comando";
+            nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
             Log("VOZ", $"Escuta ativada com {voice.RecognizerName}.");
         }
         else
@@ -714,6 +1002,7 @@ public sealed class MainForm : Form
         voiceToggle.Text = "Ativar voz";
         voiceStatus.Text = "Voz desativada";
         assistantStatus.Text = "Voz desativada";
+        wakeChipValue.Text = "Inativo";
     }
 
     private async Task ExecuteCommandTextAsync(string text, bool fromVoice)
@@ -723,28 +1012,153 @@ public sealed class MainForm : Form
 
         SaveUi();
         assistantStatus.Text = "Processando comando...";
+        nextActionValue.Text = "Analisando comando";
+        nextActionMeta.Text = text;
+        SetHeroState("Entendendo seu comando...", text, "Groq STT + vocabulário Marsan", "PROCESSANDO");
         Log(fromVoice ? "VOCÊ • VOZ" : "VOCÊ", text);
 
         try
         {
             var result = await nox.ExecuteAsync(text, cfg, CancellationToken.None);
-            assistantStatus.Text = result.Success ? "Comando concluído" : "Não entendi o comando";
+
             if (result.Diagnostics is not null)
                 foreach (var line in result.Diagnostics)
                     Log("ANÁLISE", line);
 
             Log("MARSAN", result.Message);
 
-            if (result.Success) command.Clear();
+            if (result.Success)
+            {
+                assistantStatus.Text = "Comando concluído";
+                command.Clear();
+
+                if (!string.IsNullOrWhiteSpace(result.Target))
+                {
+                    lastTarget = result.Target!;
+                    lastTargetAt = DateTime.Now;
+                    lastCommandValue.Text = lastTarget;
+                    lastCommandMeta.Text = $"Identificada via {(fromVoice ? "voz" : "comando manual")} • {DateTime.Now:HH:mm:ss}";
+                    SetHeroState($"Imprimindo {lastTarget}",
+                        "Planilha identificada com sucesso",
+                        "Comando processado • enviado ao Print Agent",
+                        "ENVIADO");
+                    nextActionValue.Text = "Aguardando impressão";
+                    nextActionMeta.Text = lastTarget;
+                }
+                else
+                {
+                    SetHeroState("Comando executado", result.Message,
+                        $"Concluído às {DateTime.Now:HH:mm:ss}", "CONCLUÍDO");
+                }
+            }
+            else
+            {
+                assistantStatus.Text = "Não entendi o comando";
+                SetHeroState("Não consegui identificar a planilha",
+                    "Tente falar somente o nome da planilha.",
+                    result.Message,
+                    "AGUARDANDO");
+                nextActionValue.Text = "Tentar novamente";
+                nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
+            }
         }
         catch (Exception ex)
         {
             assistantStatus.Text = "Erro ao executar";
+            SetHeroState("Erro ao executar comando", "Ocorreu uma falha durante o processamento.",
+                ex.Message, "ERRO");
             Log("ERRO", ex.Message);
         }
     }
 
-    private void Log(string who, string text) => output.AppendText($"[{DateTime.Now:HH:mm:ss}] {who}: {text}{Environment.NewLine}");
+    private void Log(string who, string text)
+    {
+        output.AppendText($"[{DateTime.Now:HH:mm:ss}] {who,-12} {text}{Environment.NewLine}");
+        output.SelectionStart = output.TextLength;
+        output.ScrollToCaret();
+    }
+
+    private void SetHeroState(string title, string subtitle, string meta, string badge)
+    {
+        heroTitle.Text = title;
+        heroSubtitle.Text = subtitle;
+        heroMeta.Text = meta;
+        heroBadge.Text = badge;
+    }
+
+    private void UpdateDashboardFromVoiceStatus(string status)
+    {
+        wakeChipValue.Text = voice.IsRunning ? "Ativo" : "Inativo";
+
+        if (status.Contains("Groq", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("entendendo", StringComparison.OrdinalIgnoreCase))
+            groqChipValue.Text = "Online";
+
+        if (status.Contains("ATIVADO", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("fale", StringComparison.OrdinalIgnoreCase))
+        {
+            nextActionValue.Text = "Ouvindo comando";
+            nextActionMeta.Text = "Fale o nome da planilha";
+        }
+        else if (status.Contains("Aguardando", StringComparison.OrdinalIgnoreCase))
+        {
+            nextActionValue.Text = "Aguardando comando";
+            nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
+        }
+    }
+
+    private void UpdateDashboardFromPrintStatus(string status)
+    {
+        printChipValue.Text = status.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase)
+            ? "Erro"
+            : printService.IsRunning ? "Conectado" : "Parado";
+
+        if (status.Contains("pendente", StringComparison.OrdinalIgnoreCase))
+            queueValue.Text = ExtractPendingText(status);
+
+        if (status.StartsWith("Imprimindo • ", StringComparison.OrdinalIgnoreCase))
+        {
+            var target = status["Imprimindo • ".Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                lastTarget = target;
+                lastTargetAt = DateTime.Now;
+                lastCommandValue.Text = target;
+                lastCommandMeta.Text = $"Identificada • {DateTime.Now:HH:mm:ss}";
+                SetHeroState($"Imprimindo {target}", "Planilha identificada com sucesso",
+                    "Print Agent processando o documento...", "EXECUTANDO");
+                nextActionValue.Text = "Imprimindo";
+                nextActionMeta.Text = target;
+            }
+        }
+        else if (status.StartsWith("Impresso • ", StringComparison.OrdinalIgnoreCase))
+        {
+            var target = status["Impresso • ".Length..].Trim();
+            SetHeroState($"Impressão concluída", target,
+                $"Concluído às {DateTime.Now:HH:mm:ss}", "CONCLUÍDO");
+            queueMeta.Text = $"Último: {target}";
+            nextActionValue.Text = "Aguardando comando";
+            nextActionMeta.Text = "Pronto para a próxima solicitação";
+        }
+        else if (status.StartsWith("PDF salvo • ", StringComparison.OrdinalIgnoreCase))
+        {
+            SetHeroState("PDF salvo com sucesso", lastTarget.Length > 0 ? lastTarget : "Documento processado",
+                status, "CONCLUÍDO");
+            nextActionValue.Text = "Aguardando comando";
+        }
+        else if (status.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase))
+        {
+            SetHeroState("Falha na impressão", lastTarget.Length > 0 ? lastTarget : "Documento",
+                status, "ERRO");
+        }
+    }
+
+    private static string ExtractPendingText(string status)
+    {
+        var m = Regex.Match(status, @"(\d+)\s+pendente");
+        if (!m.Success) return "0 pendentes";
+        return m.Groups[1].Value == "1" ? "1 pendente" : $"{m.Groups[1].Value} pendentes";
+    }
 
     private void RefreshPrinters()
     {
