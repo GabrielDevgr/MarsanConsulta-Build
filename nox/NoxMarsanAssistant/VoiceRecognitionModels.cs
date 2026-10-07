@@ -62,6 +62,11 @@ public sealed record VoiceInterpretation(
     string? ConfirmationPrompt,
     IReadOnlyList<string> Diagnostics);
 
+public sealed class VoiceTrainingProfile
+{
+    public Dictionary<string, List<string>> Terms { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
 public sealed record PendingVoiceAction(
     MarsanIntent Intent,
     string EntityId,
