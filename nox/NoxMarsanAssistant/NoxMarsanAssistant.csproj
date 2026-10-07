@@ -12,7 +12,7 @@
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishTrimmed>false</PublishTrimmed>
-    <Version>0.7.5</Version>
+    <Version>0.7.6</Version>
     <Company>Marsan Madeiras</Company>
     <Product>MARSAN Assistant</Product>
     <Description>Assistente de voz offline e central de impressão da Marsan Madeiras</Description>
