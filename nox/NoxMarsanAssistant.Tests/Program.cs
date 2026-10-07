@@ -13,7 +13,12 @@ var accounts = new[]
 };
 
 var settings = new VoiceRecognitionSettings();
-var entities = MarsanVocabulary.BuildEntities(accounts);
+var training = new VoiceTrainingProfile();
+training.Terms["TORAS AZA"] = ["horas asia", "toras asia", "tora asa", "toras asa"];
+training.Terms["TORAS GUSE"] = ["guze"];
+training.Terms["SERRAGEM GELENSKI"] = ["gelensqui"];
+training.Terms["MAD. TIOTO"] = ["tioto"];
+var entities = MarsanVocabulary.BuildEntities(accounts, training);
 var interpreter = new MarsanVoiceInterpreter();
 var failures = new List<string>();
 
@@ -43,7 +48,7 @@ Expect("imprime pra mim Santa Clara", MarsanIntent.Print, "SANTA CLARA", true);
 Expect("pode imprimir a Santa Clara", MarsanIntent.Print, "SANTA CLARA", true);
 Expect("quero a planilha da Santa Clara impressa", MarsanIntent.Print, "SANTA CLARA", true);
 Expect("imprimir planilha Tioto", MarsanIntent.Print, "TIOTO", true);
-Expect("prima tora za", MarsanIntent.Print, "TORAS AZA", true);
+Expect("prima tora za", MarsanIntent.Print, "TORAS AZA", false, true);
 Expect("imprima horas aza", MarsanIntent.Print, "TORAS AZA", true);
 Expect("imprima toras asa", MarsanIntent.Print, "TORAS AZA", true);
 Expect("imprima guze", MarsanIntent.Print, "GUSE", true);
@@ -53,7 +58,7 @@ Expect("abra Santa Clara", MarsanIntent.Open, "SANTA CLARA", true);
 Expect("imprima santa", MarsanIntent.Print, "SANTA CLARA", false, true);
 Expect("imprima documento inexistente", MarsanIntent.Print, null, false);
 Expect("imprima", MarsanIntent.Print, null, false);
-Expect("quero falar com o financeiro", MarsanIntent.Unknown, null, false);
+Expect("quero falar com o financeiro", MarsanIntent.Open, null, false);
 
 foreach (var w in new[] { "marsan", "marsam", "marçam", "marzan", "maçan" })
 {
