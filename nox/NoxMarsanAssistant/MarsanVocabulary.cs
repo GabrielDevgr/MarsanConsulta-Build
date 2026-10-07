@@ -6,6 +6,11 @@ public static class MarsanVocabulary
 {
     private static readonly string[] WakeAliases =
     [
+        // Wake word oficial: MS, pronunciado "ême ésse".
+        "eme esse", "ême ésse", "eme ése", "eme esse", "m s", "ms",
+        "emeesse", "emece", "eme se", "eme s",
+
+        // Compatibilidade temporária com a wake word anterior.
         "marsan", "marsam", "marcam", "marcan", "marzan", "masan", "marsa", "marsao", "marsã", "marçam", "maçan"
     ];
 
