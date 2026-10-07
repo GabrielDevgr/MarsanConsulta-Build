@@ -8,7 +8,7 @@ namespace NoxMarsanAssistant;
 public sealed class VoiceService : IDisposable
 {
     private SpeechRecognitionEngine? recognizer;
-    private readonly SpeechSynthesizer synthesizer = new();
+    private SpeechSynthesizer? synthesizer;
     private bool waitingForCommand;
     private bool running;
 
@@ -23,6 +23,8 @@ public sealed class VoiceService : IDisposable
     {
         try
         {
+            synthesizer ??= CreateSynthesizerSafe();
+
             var installed = SpeechRecognitionEngine.InstalledRecognizers().ToList();
             if (installed.Count == 0)
                 throw new InvalidOperationException("Nenhum reconhecedor de voz do Windows está instalado.");
@@ -64,11 +66,19 @@ public sealed class VoiceService : IDisposable
 
     public void Start()
     {
-        if (recognizer is null && !Initialize()) return;
-        if (running) return;
-        running = true;
-        waitingForCommand = false;
-        StartWakeRecognition();
+        try
+        {
+            if (recognizer is null && !Initialize()) return;
+            if (running) return;
+            running = true;
+            waitingForCommand = false;
+            StartWakeRecognition();
+        }
+        catch (Exception ex)
+        {
+            running = false;
+            ErrorOccurred?.Invoke(ex.Message);
+        }
     }
 
     public void Stop()
@@ -84,10 +94,18 @@ public sealed class VoiceService : IDisposable
         if (string.IsNullOrWhiteSpace(text)) return;
         try
         {
+            synthesizer ??= CreateSynthesizerSafe();
+            if (synthesizer is null) return;
             synthesizer.SpeakAsyncCancelAll();
             synthesizer.SpeakAsync(text);
         }
         catch { }
+    }
+
+    private static SpeechSynthesizer? CreateSynthesizerSafe()
+    {
+        try { return new SpeechSynthesizer(); }
+        catch { return null; }
     }
 
     private void StartWakeRecognition()
@@ -111,6 +129,7 @@ public sealed class VoiceService : IDisposable
         }
         catch (Exception ex)
         {
+            running = false;
             ErrorOccurred?.Invoke(ex.Message);
         }
     }
@@ -170,6 +189,7 @@ public sealed class VoiceService : IDisposable
 
     private void TrySelectPortugueseVoice()
     {
+        if (synthesizer is null) return;
         try
         {
             var pt = synthesizer.GetInstalledVoices()
@@ -190,7 +210,7 @@ public sealed class VoiceService : IDisposable
     public void Dispose()
     {
         Stop();
-        recognizer?.Dispose();
-        synthesizer.Dispose();
+        try { recognizer?.Dispose(); } catch { }
+        try { synthesizer?.Dispose(); } catch { }
     }
 }
