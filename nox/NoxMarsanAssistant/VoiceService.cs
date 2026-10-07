@@ -612,47 +612,49 @@ public sealed class VoiceService : IDisposable
 
     private bool TryHandleWakeSequence(string normalized, bool isPartial)
     {
-        if (state is AssistantState.Processing or AssistantState.Speaking or AssistantState.Cooldown or AssistantState.Listening or AssistantState.Guard)
+        // Durante processamento/escuta/resposta, wake word fica bloqueada.
+        if (state is AssistantState.Processing or AssistantState.Speaking or
+            AssistantState.Cooldown or AssistantState.Listening or AssistantState.Guard)
             return false;
 
-        var n = VoiceTextNormalizer.Normalize(normalized);
+        var n = VoiceTextNormalizer.Normalize(normalized).Trim();
         if (string.IsNullOrWhiteSpace(n))
             return false;
 
         var now = DateTime.Now;
 
-        if (wakeSequenceArmed && now - wakeSequenceStartedAt > TimeSpan.FromMilliseconds(1200))
+        // Hipótese completa: como o recognizer de espera usa gramática fechada
+        // exclusivamente para MS, não exigimos repetição. Parcial ou final,
+        // "eme esse", "eme s", "eme se", "ms" já confirma a wake word.
+        if (n is "eme esse" or "eme se" or "eme s" or "m s" or "ms" or "emese")
+        {
+            ActivateWake(n);
+            return true;
+        }
+
+        // Expira rapidamente uma primeira metade antiga.
+        if (wakeSequenceArmed &&
+            now - wakeSequenceStartedAt > TimeSpan.FromMilliseconds(1800))
         {
             wakeSequenceArmed = false;
             consecutiveWakeHits = 0;
             SetState(AssistantState.Idle);
         }
 
-        // Forma completa em uma única hipótese do recognizer restrito.
-        var completeWake = n is "eme esse" or "eme se" or "eme s" or "m s" or "ms" or "emese";
-        if (completeWake)
-        {
-            consecutiveWakeHits++;
-            if (consecutiveWakeHits < 2 && isPartial)
-                return false;
-
-            ActivateWake(n);
-            return true;
-        }
-
-        // Primeira parte: somente formas exatas, nunca "contains".
-        if (!wakeSequenceArmed && n is "eme" or "em")
+        // Primeira metade.
+        if (!wakeSequenceArmed && (n == "eme" || n == "em"))
         {
             wakeSequenceArmed = true;
             wakeSequenceStartedAt = now;
             consecutiveWakeHits = 1;
             SetState(AssistantState.WakeArmed);
-            DiagnosticLog?.Invoke($"[WAKE] primeira parte: \"{n}\"");
+            DiagnosticLog?.Invoke($"[WAKE] primeira parte detectada: \"{n}\"");
             return false;
         }
 
-        // Segunda parte precisa chegar logo após a primeira.
-        if (wakeSequenceArmed && n is "s" or "se" or "esse" or "ese")
+        // Segunda metade dentro da janela.
+        if (wakeSequenceArmed &&
+            (n == "s" || n == "se" || n == "esse" || n == "ese"))
         {
             ActivateWake(n);
             return true;
@@ -668,7 +670,7 @@ public sealed class VoiceService : IDisposable
 
         PlayActivationTone();
         DiagnosticLog?.Invoke($"[WAKE] MS confirmado: \"{heard}\"");
-        DiagnosticLog?.Invoke("[MS ATIVADO] >>> LISTENING <<< • Whisper");
+        DiagnosticLog?.Invoke("[MS ATIVADO] >>> LISTENING <<< • Groq STT");
         StatusChanged?.Invoke("MS ATIVADO • fale o nome...");
         BeginWhisperCommandCapture();
     }
