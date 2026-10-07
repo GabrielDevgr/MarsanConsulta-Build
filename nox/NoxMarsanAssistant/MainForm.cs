@@ -108,7 +108,6 @@ public sealed class MainForm : Form
             else action();
         }
         catch (InvalidOperationException) { }
-        catch (ObjectDisposedException) { }
     }
 
     private void BuildUi()
