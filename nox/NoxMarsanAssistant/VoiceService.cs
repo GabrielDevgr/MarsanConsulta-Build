@@ -27,7 +27,7 @@ public sealed class VoiceService : IDisposable
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
-    public event Action<string>? ErrorOccurred;
+    public event Action<string>? ErrorOccurred;\n    public event Action<string>? HeardWhileWaiting;
 
     public bool IsRunning => running;
     public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
@@ -262,6 +262,10 @@ public sealed class VoiceService : IDisposable
 
                 ResetRecognizer(wakeOnly: false);
             }
+            else if (!isPartial)
+            {
+                HeardWhileWaiting?.Invoke(text);
+            }
 
             return;
         }
@@ -286,20 +290,8 @@ public sealed class VoiceService : IDisposable
 
         if (model is null) return;
 
-        if (wakeOnly)
-        {
-            var grammar = JsonSerializer.Serialize(new[]
-            {
-                "nox", "nóx", "nocs", "nocks", "noques", "[unk]"
-            });
-
-            recognizer = new VoskRecognizer(model, 16000.0f, grammar);
-        }
-        else
-        {
-            recognizer = new VoskRecognizer(model, 16000.0f);
-            recognizer.SetWords(true);
-        }
+        recognizer = new VoskRecognizer(model, 16000.0f);
+        recognizer.SetWords(true);
     }
 
     private static string ReadText(string json, string property)
@@ -320,17 +312,25 @@ public sealed class VoiceService : IDisposable
         if (string.IsNullOrWhiteSpace(value)) return false;
 
         var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // O modelo PT-BR costuma transcrever "NOX" como "nos", "noz" ou "nosso".
+        // Aceitamos essas formas apenas em falas curtas para reduzir falsos positivos.
+        if (tokens.Length <= 2 &&
+            tokens.Any(t => t is "nox" or "nocs" or "nocks" or "noques" or "nos" or "noz" or "nós" or "nois" or "noxx"))
+            return true;
+
         return tokens.Any(t => t is "nox" or "nocs" or "nocks" or "noques");
     }
 
     private static string Normalize(string value)
     {
-        return (value ?? "")
-            .Trim()
-            .ToLowerInvariant()
-            .Replace("ó", "o")
-            .Replace("ô", "o")
-            .Replace("ò", "o");
+        if (string.IsNullOrWhiteSpace(value)) return "";
+
+        var decomposed = value.Trim().ToLowerInvariant().Normalize(System.Text.NormalizationForm.FormD);
+        var chars = decomposed.Where(c =>
+            System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark);
+
+        return new string(chars.ToArray()).Normalize(System.Text.NormalizationForm.FormC);
     }
 
     private static SpeechSynthesizer? CreateSynthesizerSafe()
