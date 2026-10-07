@@ -266,6 +266,12 @@ public sealed class VoiceService : IDisposable
             else if (!isPartial)
             {
                 HeardWhileWaiting?.Invoke(text);
+
+                if (LooksLikeDirectCommand(normalized))
+                {
+                    StatusChanged?.Invoke($"Comando direto detectado: {text}");
+                    CommandRecognized?.Invoke(text.Trim());
+                }
             }
 
             return;
@@ -306,6 +312,24 @@ public sealed class VoiceService : IDisposable
         catch { }
 
         return "";
+    }
+
+    private static bool LooksLikeDirectCommand(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var prefixes = new[]
+        {
+            "imprima", "imprime", "imprimir",
+            "abra", "abrir",
+            "mostre", "mostrar",
+            "consulte", "consultar",
+            "status"
+        };
+
+        return prefixes.Any(p =>
+            value.Equals(p, StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith(p + " ", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool ContainsWakeWord(string value)
