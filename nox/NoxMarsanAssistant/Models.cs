@@ -15,6 +15,7 @@ public sealed class NoxConfig
     public string OutputFolder { get; set; } = @"C:\MarsanPrint\Impressos";
     public string PrinterName { get; set; } = "";
     public bool SavePdfInsteadOfPrint { get; set; } = false;
+    public VoiceRecognitionSettings VoiceRecognition { get; set; } = new();
 }
 
 public sealed class PrintJob
@@ -32,4 +33,8 @@ public sealed class JobsResponse
     [JsonPropertyName("jobs")] public List<PrintJob> Jobs { get; set; } = new();
 }
 
-public sealed record NoxCommandResult(bool Success, string Message);
+public sealed record NoxCommandResult(
+    bool Success,
+    string Message,
+    bool RequiresConfirmation = false,
+    IReadOnlyList<string>? Diagnostics = null);
