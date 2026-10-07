@@ -220,32 +220,36 @@ public sealed class WhisperLocalService : IDisposable
             response.EnsureSuccessStatusCode();
             var total = response.Content.Headers.ContentLength;
 
-            await using var source = await response.Content.ReadAsStreamAsync(ct);
-            await using var target = new FileStream(
+            // O stream precisa ser fechado ANTES de mover o .download.
+            // Caso contrário o Windows mantém o arquivo bloqueado pelo próprio
+            // processo e File.Move falha com "file is being used by another process".
+            await using (var source = await response.Content.ReadAsStreamAsync(ct))
+            await using (var target = new FileStream(
                 temp,
                 FileMode.Create,
                 FileAccess.Write,
                 FileShare.None,
                 1024 * 128,
-                true);
-
-            var buffer = new byte[1024 * 128];
-            long readTotal = 0;
-            int read;
-
-            while ((read = await source.ReadAsync(buffer.AsMemory(), ct)) > 0)
+                true))
             {
-                await target.WriteAsync(buffer.AsMemory(0, read), ct);
-                readTotal += read;
+                var buffer = new byte[1024 * 128];
+                long readTotal = 0;
+                int read;
 
-                if (total is > 0)
+                while ((read = await source.ReadAsync(buffer.AsMemory(), ct)) > 0)
                 {
-                    var pct = (int)Math.Clamp(readTotal * 100 / total.Value, 0, 100);
-                    StatusChanged?.Invoke($"{label} • {pct}%");
-                }
-            }
+                    await target.WriteAsync(buffer.AsMemory(0, read), ct);
+                    readTotal += read;
 
-            await target.FlushAsync(ct);
+                    if (total is > 0)
+                    {
+                        var pct = (int)Math.Clamp(readTotal * 100 / total.Value, 0, 100);
+                        StatusChanged?.Invoke($"{label} • {pct}%");
+                    }
+                }
+
+                await target.FlushAsync(ct);
+            }
 
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Move(temp, destination, true);
