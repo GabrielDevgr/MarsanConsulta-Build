@@ -273,25 +273,32 @@ public sealed class VoiceService : IDisposable
                         fallbackPartial = ReadText(wakeFallbackRecognizer.PartialResult(), "partial");
                 }
 
-                if (isFinal)
-                {
-                    var text = ReadText(recognizer.Result(), "text");
-                    if (!string.IsNullOrWhiteSpace(text))
-                        HandleRecognizedText(text, isPartial: false);
-                }
-                else
-                {
-                    var partial = ReadText(recognizer.PartialResult(), "partial");
-                    if (!string.IsNullOrWhiteSpace(partial))
-                        HandleRecognizedText(partial, isPartial: true);
-                }
-
+                // Primeiro processamos o recognizer livre de fallback. Ele pode
+                // conter a frase completa "MS + comando", enquanto a gramática
+                // restrita normalmente contém apenas a wake word.
                 if (!commandMode && !trainingMode)
                 {
                     if (fallbackFinal && !string.IsNullOrWhiteSpace(fallbackText))
                         HandleWakeFallback(fallbackText, isPartial: false);
                     else if (!string.IsNullOrWhiteSpace(fallbackPartial))
                         HandleWakeFallback(fallbackPartial, isPartial: true);
+                }
+
+                // Se o fallback não mudou de modo, processa o recognizer principal.
+                if (!trainingMode)
+                {
+                    if (isFinal)
+                    {
+                        var text = ReadText(recognizer.Result(), "text");
+                        if (!string.IsNullOrWhiteSpace(text))
+                            HandleRecognizedText(text, isPartial: false);
+                    }
+                    else
+                    {
+                        var partial = ReadText(recognizer.PartialResult(), "partial");
+                        if (!string.IsNullOrWhiteSpace(partial))
+                            HandleRecognizedText(partial, isPartial: true);
+                    }
                 }
 
                 if (trainingMode && DateTime.Now - trainingStartedAt > TimeSpan.FromSeconds(8))
@@ -335,21 +342,29 @@ public sealed class VoiceService : IDisposable
         if (!commandMode)
         {
             var wakeScore = MarsanVocabulary.WakeScore(normalized);
-            var wakeToken = wakeScore >= recognitionSettings.WakeExecuteThreshold ? normalized : null;
 
-            if (wakeToken is not null)
+            // Nunca troca de recognizer durante resultado parcial. Fazer isso no
+            // meio da fala corta o áudio seguinte e foi a causa do "MS reconhece,
+            // mas não ouve o comando".
+            if (isPartial)
             {
-                if (!isPartial)
+                if (ShouldReportWaitingTranscript(text, true))
+                    HeardWhileWaiting?.Invoke(text);
+                return;
+            }
+
+            if (wakeScore >= recognitionSettings.WakeExecuteThreshold)
+            {
+                var inlineCommand = ExtractCommandAfterWake(normalized);
+                if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
                 {
-                    var inlineCommand = RemoveWakeToken(normalized, wakeToken);
-                    if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
-                    {
-                        SystemSounds.Asterisk.Play();
-                        StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
-                        CommandRecognized?.Invoke(inlineCommand);
-                        ResetRecognizer(wakeOnly: true);
-                        return;
-                    }
+                    SystemSounds.Asterisk.Play();
+                    DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
+                    DiagnosticLog?.Invoke($"[MS ATIVADO] Comando na mesma frase: \"{inlineCommand}\"");
+                    StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
+                    CommandRecognized?.Invoke(inlineCommand);
+                    ResetRecognizer(wakeOnly: true);
+                    return;
                 }
 
                 commandMode = true;
@@ -357,15 +372,16 @@ public sealed class VoiceService : IDisposable
 
                 SystemSounds.Asterisk.Play();
                 DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
-                StatusChanged?.Invoke($"MS ativado • {wakeScore:P0} • ouvindo comando...");
+                DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+                StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
                 ResetRecognizer(wakeOnly: false);
             }
             else
             {
-                if (ShouldReportWaitingTranscript(text, isPartial))
+                if (ShouldReportWaitingTranscript(text, false))
                     HeardWhileWaiting?.Invoke(text);
 
-                if (!isPartial && LooksLikeDirectCommand(normalized))
+                if (LooksLikeDirectCommand(normalized))
                 {
                     StatusChanged?.Invoke($"Comando direto detectado: {text}");
                     CommandRecognized?.Invoke(text.Trim());
@@ -429,28 +445,65 @@ public sealed class VoiceService : IDisposable
             return;
 
         var score = MarsanVocabulary.WakeScore(normalized);
-
-        // Reforços fonéticos observáveis no reconhecimento livre. Não são
-        // suficientes sozinhos se estiverem muito distantes, evitando
-        // ativações aleatórias.
-        var phonetic = PortuguesePhonetics.Encode(normalized);
-        var wakePhonetic = PortuguesePhonetics.Encode("eme esse");
-        var phoneticScore = VoiceSimilarity.PhoneticSimilarity(phonetic, wakePhonetic);
+        var phoneticScore = VoiceSimilarity.PhoneticSimilarity(normalized, "eme esse");
         var combined = Math.Max(score, phoneticScore);
+
+        // Assim como no recognizer principal, resultado parcial serve apenas
+        // para diagnóstico. A ativação acontece somente no resultado final.
+        if (isPartial)
+        {
+            if (ShouldReportWaitingTranscript(text, true))
+                HeardWhileWaiting?.Invoke($"fallback: {text}");
+            return;
+        }
 
         if (combined >= recognitionSettings.WakeExecuteThreshold)
         {
+            var inlineCommand = ExtractCommandAfterWake(normalized);
+            if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
+            {
+                SystemSounds.Asterisk.Play();
+                DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
+                DiagnosticLog?.Invoke($"[MS ATIVADO] Comando na mesma frase: \"{inlineCommand}\"");
+                StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
+                CommandRecognized?.Invoke(inlineCommand);
+                ResetRecognizer(wakeOnly: true);
+                return;
+            }
+
             commandMode = true;
             commandStartedAt = DateTime.Now;
             SystemSounds.Asterisk.Play();
             DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
-            StatusChanged?.Invoke($"MS ativado • {combined:P0} • ouvindo comando...");
+            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+            StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
             ResetRecognizer(wakeOnly: false);
             return;
         }
 
-        if (ShouldReportWaitingTranscript(text, isPartial))
+        if (ShouldReportWaitingTranscript(text, false))
             HeardWhileWaiting?.Invoke($"fallback: {text}");
+    }
+
+    private static string ExtractCommandAfterWake(string value)
+    {
+        var normalized = VoiceTextNormalizer.Normalize(value);
+        if (string.IsNullOrWhiteSpace(normalized)) return "";
+
+        foreach (var alias in MarsanVocabulary.GetWakeAliases()
+                     .Select(VoiceTextNormalizer.Normalize)
+                     .Where(x => !string.IsNullOrWhiteSpace(x))
+                     .OrderByDescending(x => x.Length))
+        {
+            var index = normalized.IndexOf(alias, StringComparison.Ordinal);
+            if (index < 0) continue;
+
+            var after = normalized[(index + alias.Length)..].Trim();
+            if (!string.IsNullOrWhiteSpace(after))
+                return after;
+        }
+
+        return "";
     }
 
     private static string ReadText(string json, string property)
