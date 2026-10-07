@@ -29,6 +29,7 @@ public sealed class MainForm : Form
     private readonly Dictionary<string, Button> navButtons = new();
 
     private string currentPage = "assistant";
+    private string currentAgentStatus = "Parado";
     private bool reallyExit;
 
     private static readonly Color Bg = Color.FromArgb(241, 245, 242);
@@ -59,6 +60,7 @@ public sealed class MainForm : Form
 
         printService.StatusChanged += s => Ui(() =>
         {
+            currentAgentStatus = s;
             agentStatus.Text = s;
             Log("PRINT", s);
         });
@@ -374,7 +376,7 @@ public sealed class MainForm : Form
         var root = new Panel { BackColor = Bg };
 
         var statusCard = CreateCard("Status do agente", 0, 0, 390, 165);
-        agentStatus.Text = "Parado";
+        agentStatus.Text = currentAgentStatus;
         agentStatus.Left = 24;
         agentStatus.Top = 55;
         agentStatus.Width = 330;
