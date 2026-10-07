@@ -19,6 +19,7 @@ public sealed class MainForm : Form
     private readonly ComboBox printers = new();
     private readonly TextBox agentToken = new();
     private readonly TextBox consultaKey = new();
+    private readonly TextBox groqKey = new();
     private readonly CheckBox autoStart = new();
     private readonly CheckBox autoListen = new();
     private readonly CheckBox voiceResponses = new();
@@ -187,7 +188,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.8.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "v0.10.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -604,11 +605,21 @@ public sealed class MainForm : Form
     {
         var root = new Panel { BackColor = Bg };
 
-        var integrations = CreateCard("Integrações", 0, 0, 800, 220);
-        AddLabeled(integrations, "Token do Print Agent", agentToken, 24, 52, true, 748);
-        AddLabeled(integrations, "Chave da API Marsan Consulta", consultaKey, 24, 122, true, 748);
+        var integrations = CreateCard("Integrações", 0, 0, 800, 290);
+        AddLabeled(integrations, "Token do Print Agent", agentToken, 24, 42, true, 748);
+        AddLabeled(integrations, "Chave da API Marsan Consulta", consultaKey, 24, 107, true, 748);
+        AddLabeled(integrations, "Groq API Key • Whisper Large V3", groqKey, 24, 172, true, 748);
+        integrations.Controls.Add(new Label
+        {
+            Text = "A chave Groq fica somente neste computador e não é enviada ao GitHub.",
+            Left = 24,
+            Top = 242,
+            Width = 620,
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 8.5f)
+        });
 
-        var behavior = CreateCard("Comportamento", 0, 240, 800, 220);
+        var behavior = CreateCard("Comportamento", 0, 310, 800, 190);
         behavior.Controls.Add(new Label { Text = "Intervalo de consulta", Left = 24, Top = 54, Width = 180, ForeColor = TextColor });
         poll.Left = 210;
         poll.Top = 48;
@@ -622,12 +633,9 @@ public sealed class MainForm : Form
         autoStart.SetBounds(24, 98, 300, 28);
         autoListen.Text = "Ativar escuta ao iniciar";
         autoListen.SetBounds(24, 132, 300, 28);
-        voiceResponses.Text = "Responder por voz";
-        voiceResponses.SetBounds(24, 166, 300, 28);
+        behavior.Controls.AddRange(new Control[] { autoStart, autoListen });
 
-        behavior.Controls.AddRange(new Control[] { autoStart, autoListen, voiceResponses });
-
-        var save = new Button { Text = "Salvar configurações", Left = 0, Top = 485, Width = 190, Height = 42 };
+        var save = new Button { Text = "Salvar configurações", Left = 0, Top = 525, Width = 190, Height = 42 };
         StylePrimaryButton(save);
         save.Click += (_, _) => { SaveUi(); MessageBox.Show("Configurações salvas.", "MARSAN Assistant"); };
 
@@ -684,7 +692,7 @@ public sealed class MainForm : Form
     {
         voiceToggle.Enabled = false;
         voiceToggle.Text = "Preparando...";
-        await voice.StartAsync(cfg.VoiceRecognition);
+        await voice.StartAsync(cfg.VoiceRecognition, cfg.GroqApiKey);
         voiceToggle.Enabled = true;
 
         if (voice.IsRunning)
@@ -727,17 +735,12 @@ public sealed class MainForm : Form
 
             Log("MARSAN", result.Message);
 
-            if (cfg.VoiceResponses && fromVoice)
-                voice.Speak(result.Message);
-
             if (result.Success) command.Clear();
         }
         catch (Exception ex)
         {
             assistantStatus.Text = "Erro ao executar";
             Log("ERRO", ex.Message);
-            if (cfg.VoiceResponses && fromVoice)
-                voice.Speak("Ocorreu um erro ao executar o comando.");
         }
     }
 
@@ -757,9 +760,10 @@ public sealed class MainForm : Form
     {
         agentToken.Text = cfg.AgentToken;
         consultaKey.Text = cfg.ConsultaApiKey;
+        groqKey.Text = cfg.GroqApiKey;
         autoStart.Checked = cfg.AutoStart;
         autoListen.Checked = cfg.StartListeningOnLaunch;
-        voiceResponses.Checked = cfg.VoiceResponses;
+        voiceResponses.Checked = false;
         savePdf.Checked = cfg.SavePdfInsteadOfPrint;
         poll.Value = Math.Clamp(cfg.PollSeconds, 3, 300);
     }
@@ -768,9 +772,10 @@ public sealed class MainForm : Form
     {
         cfg.AgentToken = agentToken.Text.Trim();
         cfg.ConsultaApiKey = consultaKey.Text.Trim();
+        cfg.GroqApiKey = groqKey.Text.Trim();
         cfg.AutoStart = autoStart.Checked;
         cfg.StartListeningOnLaunch = autoListen.Checked;
-        cfg.VoiceResponses = voiceResponses.Checked;
+        cfg.VoiceResponses = false;
         cfg.SavePdfInsteadOfPrint = savePdf.Checked;
         cfg.PollSeconds = (int)poll.Value;
         cfg.PrinterName = printers.SelectedItem?.ToString() ?? cfg.PrinterName;
