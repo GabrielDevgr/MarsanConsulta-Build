@@ -19,6 +19,7 @@ public sealed class VoiceService : IDisposable
     private WaveInEvent? waveIn;
     private Model? model;
     private VoskRecognizer? recognizer;
+    private VoskRecognizer? wakeFallbackRecognizer;
     private SpeechSynthesizer? synthesizer;
 
     private bool running;
@@ -257,6 +258,21 @@ public sealed class VoiceService : IDisposable
 
                 var isFinal = recognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
 
+                // Enquanto aguardamos a wake word, alimenta também um reconhecedor
+                // livre. Isso evita depender de "Marsan" existir no vocabulário
+                // da gramática restrita do Vosk.
+                bool fallbackFinal = false;
+                string fallbackText = "";
+                string fallbackPartial = "";
+                if (!commandMode && !trainingMode && wakeFallbackRecognizer is not null)
+                {
+                    fallbackFinal = wakeFallbackRecognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
+                    if (fallbackFinal)
+                        fallbackText = ReadText(wakeFallbackRecognizer.Result(), "text");
+                    else
+                        fallbackPartial = ReadText(wakeFallbackRecognizer.PartialResult(), "partial");
+                }
+
                 if (isFinal)
                 {
                     var text = ReadText(recognizer.Result(), "text");
@@ -268,6 +284,14 @@ public sealed class VoiceService : IDisposable
                     var partial = ReadText(recognizer.PartialResult(), "partial");
                     if (!string.IsNullOrWhiteSpace(partial))
                         HandleRecognizedText(partial, isPartial: true);
+                }
+
+                if (!commandMode && !trainingMode)
+                {
+                    if (fallbackFinal && !string.IsNullOrWhiteSpace(fallbackText))
+                        HandleWakeFallback(fallbackText, isPartial: false);
+                    else if (!string.IsNullOrWhiteSpace(fallbackPartial))
+                        HandleWakeFallback(fallbackPartial, isPartial: true);
                 }
 
                 if (trainingMode && DateTime.Now - trainingStartedAt > TimeSpan.FromSeconds(8))
@@ -368,6 +392,8 @@ public sealed class VoiceService : IDisposable
     {
         recognizer?.Dispose();
         recognizer = null;
+        wakeFallbackRecognizer?.Dispose();
+        wakeFallbackRecognizer = null;
 
         if (model is null) return;
 
@@ -382,6 +408,9 @@ public sealed class VoiceService : IDisposable
             var grammar = JsonSerializer.Serialize(wakeWords);
 
             recognizer = new VoskRecognizer(model, 16000.0f, grammar);
+
+            // Reconhecedor livre em paralelo apenas durante a espera.
+            wakeFallbackRecognizer = new VoskRecognizer(model, 16000.0f);
         }
         else
         {
@@ -389,6 +418,39 @@ public sealed class VoiceService : IDisposable
         }
 
         recognizer.SetWords(true);
+        wakeFallbackRecognizer?.SetWords(true);
+    }
+
+    private void HandleWakeFallback(string text, bool isPartial)
+    {
+        var normalized = VoiceTextNormalizer.Normalize(text);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        var score = MarsanVocabulary.WakeScore(normalized);
+
+        // Reforços fonéticos observáveis no reconhecimento livre. Não são
+        // suficientes sozinhos se estiverem muito distantes, evitando
+        // ativações aleatórias.
+        var compact = normalized.Replace(" ", "");
+        var phonetic = PortuguesePhonetics.Encode(normalized);
+        var wakePhonetic = PortuguesePhonetics.Encode("marsan");
+        var phoneticScore = VoiceSimilarity.PhoneticSimilarity(phonetic, wakePhonetic);
+        var combined = Math.Max(score, phoneticScore);
+
+        if (combined >= recognitionSettings.WakeExecuteThreshold)
+        {
+            commandMode = true;
+            commandStartedAt = DateTime.Now;
+            SystemSounds.Asterisk.Play();
+            DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | Score: {combined:P0}");
+            StatusChanged?.Invoke($"MARSAN ativado • {combined:P0} • ouvindo comando...");
+            ResetRecognizer(wakeOnly: false);
+            return;
+        }
+
+        if (ShouldReportWaitingTranscript(text, isPartial))
+            HeardWhileWaiting?.Invoke($"fallback: {text}");
     }
 
     private static string ReadText(string json, string property)
@@ -578,6 +640,7 @@ public sealed class VoiceService : IDisposable
     {
         Stop();
         try { recognizer?.Dispose(); } catch { }
+        try { wakeFallbackRecognizer?.Dispose(); } catch { }
         try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
         initLock.Dispose();
