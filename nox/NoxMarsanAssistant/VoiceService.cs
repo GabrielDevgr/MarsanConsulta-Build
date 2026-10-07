@@ -15,6 +15,7 @@ public sealed class VoiceService : IDisposable
     private readonly object sync = new();
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly SemaphoreSlim initLock = new(1, 1);
+    private readonly WhisperLocalService whisper = new();
 
     private WaveInEvent? waveIn;
     private Model? model;
@@ -32,6 +33,10 @@ public sealed class VoiceService : IDisposable
     private VoiceRecognitionSettings recognitionSettings = new();
     private DateTime wakeSequenceStartedAt = DateTime.MinValue;
     private bool wakeSequenceArmed;
+    private MemoryStream? commandPcm;
+    private bool commandSpeechStarted;
+    private DateTime lastCommandVoiceAt = DateTime.MinValue;
+    private bool whisperBusy;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
@@ -41,7 +46,13 @@ public sealed class VoiceService : IDisposable
     public event Action<string>? DiagnosticLog;
 
     public bool IsRunning => running;
-    public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
+    public string RecognizerName { get; private set; } = "Vosk wake + Whisper.cpp local";
+
+    public VoiceService()
+    {
+        whisper.StatusChanged += s => StatusChanged?.Invoke(s);
+        whisper.DiagnosticLog += s => DiagnosticLog?.Invoke(s);
+    }
 
     private static string BaseFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "NOX Marsan Assistant");
@@ -118,6 +129,15 @@ public sealed class VoiceService : IDisposable
 
             waveIn.StartRecording();
             StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
+
+            // Prepara o Whisper em segundo plano. Na primeira execução baixa
+            // binário + modelo; depois todo o reconhecimento funciona offline.
+            _ = Task.Run(async () =>
+            {
+                var ok = await whisper.PrepareAsync();
+                if (ok)
+                    DiagnosticLog?.Invoke("[WHISPER] Motor local pronto para comandos.");
+            });
         }
         catch (Exception ex)
         {
@@ -141,6 +161,9 @@ public sealed class VoiceService : IDisposable
         }
         catch { }
 
+        commandPcm?.Dispose();
+        commandPcm = null;
+        whisperBusy = false;
         waveIn = null;
         StatusChanged?.Invoke("Voz desativada");
     }
@@ -258,6 +281,15 @@ public sealed class VoiceService : IDisposable
         {
             try
             {
+                if (whisperBusy)
+                    return;
+
+                if (commandMode && !trainingMode)
+                {
+                    CaptureWhisperCommand(e.Buffer, e.BytesRecorded);
+                    return;
+                }
+
                 if (recognizer is null) return;
 
                 var isFinal = recognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
@@ -311,13 +343,7 @@ public sealed class VoiceService : IDisposable
                     ResetRecognizer(wakeOnly: true);
                     StatusChanged?.Invoke("Treinamento • tempo esgotado.");
                 }
-                else if (commandMode && DateTime.Now - commandStartedAt > TimeSpan.FromSeconds(9))
-                {
-                    commandMode = false;
-                    wakeSequenceArmed = false;
-                    ResetRecognizer(wakeOnly: true);
-                    StatusChanged?.Invoke("Tempo esgotado. Diga “MS” novamente.");
-                }
+
             }
             catch (Exception ex)
             {
@@ -375,14 +401,11 @@ public sealed class VoiceService : IDisposable
                     return;
                 }
 
-                commandMode = true;
-                commandStartedAt = DateTime.Now;
-
                 SystemSounds.Asterisk.Play();
                 DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
-                DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+                DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
                 StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-                ResetRecognizer(wakeOnly: false);
+                BeginWhisperCommandCapture();
             }
             else
             {
@@ -410,6 +433,120 @@ public sealed class VoiceService : IDisposable
 
         StatusChanged?.Invoke($"Ouvi: {command}");
         CommandRecognized?.Invoke(command);
+    }
+
+    private void BeginWhisperCommandCapture()
+    {
+        commandMode = true;
+        commandStartedAt = DateTime.Now;
+        commandSpeechStarted = false;
+        lastCommandVoiceAt = DateTime.MinValue;
+
+        commandPcm?.Dispose();
+        commandPcm = new MemoryStream(capacity: 32000 * 8);
+
+        // Durante o comando o Vosk sai completamente do caminho. Apenas o PCM
+        // cru é coletado para o Whisper.
+        recognizer?.Dispose();
+        recognizer = null;
+        wakeFallbackRecognizer?.Dispose();
+        wakeFallbackRecognizer = null;
+    }
+
+    private void CaptureWhisperCommand(byte[] buffer, int bytesRecorded)
+    {
+        commandPcm ??= new MemoryStream(capacity: 32000 * 8);
+        commandPcm.Write(buffer, 0, bytesRecorded);
+
+        var rms = CalculatePcmRms(buffer, bytesRecorded);
+        var now = DateTime.Now;
+
+        // Limiar propositalmente baixo: o Whisper lida melhor com ruído do que
+        // perder o começo de uma palavra.
+        if (rms >= 300)
+        {
+            commandSpeechStarted = true;
+            lastCommandVoiceAt = now;
+        }
+
+        var elapsed = now - commandStartedAt;
+        var silenceAfterSpeech =
+            commandSpeechStarted &&
+            lastCommandVoiceAt != DateTime.MinValue &&
+            now - lastCommandVoiceAt >= TimeSpan.FromMilliseconds(900);
+
+        if ((silenceAfterSpeech && elapsed >= TimeSpan.FromMilliseconds(900)) ||
+            elapsed >= TimeSpan.FromSeconds(7))
+        {
+            FinishWhisperCommandCapture();
+        }
+    }
+
+    private void FinishWhisperCommandCapture()
+    {
+        var pcm = commandPcm?.ToArray() ?? Array.Empty<byte>();
+
+        commandPcm?.Dispose();
+        commandPcm = null;
+        commandMode = false;
+        wakeSequenceArmed = false;
+
+        ResetRecognizer(wakeOnly: true);
+
+        if (!commandSpeechStarted || pcm.Length < 8000)
+        {
+            StatusChanged?.Invoke("Não ouvi um comando. Diga “MS” novamente.");
+            DiagnosticLog?.Invoke("[WHISPER] Captura encerrada sem fala suficiente.");
+            return;
+        }
+
+        whisperBusy = true;
+        StatusChanged?.Invoke("Whisper • entendendo o comando...");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var text = await whisper.TranscribePcmAsync(pcm);
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    StatusChanged?.Invoke("Whisper não identificou fala. Diga “MS” novamente.");
+                    DiagnosticLog?.Invoke("[WHISPER] Transcrição vazia.");
+                    return;
+                }
+
+                StatusChanged?.Invoke($"Whisper ouviu: {text}");
+                DiagnosticLog?.Invoke($"[STT WHISPER] \"{text}\"");
+                CommandRecognized?.Invoke(text);
+            }
+            catch (Exception ex)
+            {
+                ErrorOccurred?.Invoke("Whisper: " + ex.Message);
+            }
+            finally
+            {
+                whisperBusy = false;
+                StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
+            }
+        });
+    }
+
+    private static double CalculatePcmRms(byte[] buffer, int bytesRecorded)
+    {
+        if (bytesRecorded < 2) return 0;
+
+        double sum = 0;
+        var count = 0;
+
+        for (var i = 0; i + 1 < bytesRecorded; i += 2)
+        {
+            var sample = (short)(buffer[i] | (buffer[i + 1] << 8));
+            sum += sample * (double)sample;
+            count++;
+        }
+
+        return count == 0 ? 0 : Math.Sqrt(sum / count);
     }
 
     private void ResetRecognizer(bool wakeOnly)
@@ -482,13 +619,11 @@ public sealed class VoiceService : IDisposable
                 return;
             }
 
-            commandMode = true;
-            commandStartedAt = DateTime.Now;
             SystemSounds.Asterisk.Play();
             DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
-            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
             StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-            ResetRecognizer(wakeOnly: false);
+            BeginWhisperCommandCapture();
             return;
         }
 
@@ -529,17 +664,12 @@ public sealed class VoiceService : IDisposable
         if (wakeSequenceArmed && HasEsse())
         {
             wakeSequenceArmed = false;
-            commandMode = true;
-            commandStartedAt = DateTime.Now;
 
             SystemSounds.Asterisk.Play();
             DiagnosticLog?.Invoke($"[WAKE SEQUENCE] MS confirmado por sequência: \"{normalized}\"");
-            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
             StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-
-            // Aqui a troca de recognizer é proposital: a wake word terminou e
-            // o usuário deve falar o comando após o bip.
-            ResetRecognizer(wakeOnly: false);
+            BeginWhisperCommandCapture();
             return true;
         }
 
@@ -757,6 +887,7 @@ public sealed class VoiceService : IDisposable
         try { wakeFallbackRecognizer?.Dispose(); } catch { }
         try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
+        whisper.Dispose();
         initLock.Dispose();
         http.Dispose();
     }
