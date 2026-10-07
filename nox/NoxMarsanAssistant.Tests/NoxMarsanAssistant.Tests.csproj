@@ -4,6 +4,8 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../NoxMarsanAssistant/NoxMarsanAssistant.csproj" />
