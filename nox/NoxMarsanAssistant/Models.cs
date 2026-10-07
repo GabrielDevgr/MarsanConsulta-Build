@@ -10,7 +10,8 @@ public sealed class NoxConfig
     public string ConsultaApiKey { get; set; } = "";
     public int PollSeconds { get; set; } = 10;
     public bool AutoStart { get; set; } = true;
-    public bool StartListeningOnLaunch { get; set; } = false;
+    public bool StartListeningOnLaunch { get; set; } = true;
+    public bool VoiceResponses { get; set; } = true;
     public string OutputFolder { get; set; } = @"C:\MarsanPrint\Impressos";
     public string PrinterName { get; set; } = "";
     public bool SavePdfInsteadOfPrint { get; set; } = false;
