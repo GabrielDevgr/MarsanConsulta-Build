@@ -30,6 +30,8 @@ public sealed class VoiceService : IDisposable
     private bool trainingMode;
     private DateTime trainingStartedAt = DateTime.MinValue;
     private VoiceRecognitionSettings recognitionSettings = new();
+    private DateTime wakeSequenceStartedAt = DateTime.MinValue;
+    private bool wakeSequenceArmed;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
@@ -111,6 +113,7 @@ public sealed class VoiceService : IDisposable
 
             running = true;
             commandMode = false;
+            wakeSequenceArmed = false;
             ResetRecognizer(wakeOnly: true);
 
             waveIn.StartRecording();
@@ -127,6 +130,7 @@ public sealed class VoiceService : IDisposable
     {
         running = false;
         commandMode = false;
+        wakeSequenceArmed = false;
 
         try { waveIn?.StopRecording(); } catch { }
         try
@@ -310,6 +314,7 @@ public sealed class VoiceService : IDisposable
                 else if (commandMode && DateTime.Now - commandStartedAt > TimeSpan.FromSeconds(9))
                 {
                     commandMode = false;
+                    wakeSequenceArmed = false;
                     ResetRecognizer(wakeOnly: true);
                     StatusChanged?.Invoke("Tempo esgotado. Diga “MS” novamente.");
                 }
@@ -338,6 +343,9 @@ public sealed class VoiceService : IDisposable
         }
 
         var normalized = Normalize(text);
+
+        if (!commandMode && TryHandleWakeSequence(normalized, isPartial))
+            return;
 
         if (!commandMode)
         {
@@ -444,6 +452,9 @@ public sealed class VoiceService : IDisposable
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
+        if (!commandMode && TryHandleWakeSequence(normalized, isPartial))
+            return;
+
         var score = MarsanVocabulary.WakeScore(normalized);
         var phoneticScore = VoiceSimilarity.PhoneticSimilarity(normalized, "eme esse");
         var combined = Math.Max(score, phoneticScore);
@@ -483,6 +494,56 @@ public sealed class VoiceService : IDisposable
 
         if (ShouldReportWaitingTranscript(text, false))
             HeardWhileWaiting?.Invoke($"fallback: {text}");
+    }
+
+    private bool TryHandleWakeSequence(string normalized, bool isPartial)
+    {
+        if (string.IsNullOrWhiteSpace(normalized))
+            return false;
+
+        var n = VoiceTextNormalizer.Normalize(normalized);
+        var tokens = n.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (wakeSequenceArmed && DateTime.Now - wakeSequenceStartedAt > TimeSpan.FromSeconds(3))
+            wakeSequenceArmed = false;
+
+        bool HasEme() =>
+            tokens.Any(t => t is "eme" or "em" or "m") ||
+            n.Contains("eme", StringComparison.Ordinal);
+
+        bool HasEsse() =>
+            tokens.Any(t => t is "s" or "se" or "esse" or "ese") ||
+            n.Contains("esse", StringComparison.Ordinal) ||
+            n.Contains("eme se", StringComparison.Ordinal) ||
+            n.Contains("eme s", StringComparison.Ordinal) ||
+            n.Contains("emese", StringComparison.Ordinal);
+
+        if (!wakeSequenceArmed && HasEme())
+        {
+            wakeSequenceArmed = true;
+            wakeSequenceStartedAt = DateTime.Now;
+            DiagnosticLog?.Invoke($"[WAKE SEQUENCE] Primeira parte detectada: \"{normalized}\"");
+            return false;
+        }
+
+        if (wakeSequenceArmed && HasEsse())
+        {
+            wakeSequenceArmed = false;
+            commandMode = true;
+            commandStartedAt = DateTime.Now;
+
+            SystemSounds.Asterisk.Play();
+            DiagnosticLog?.Invoke($"[WAKE SEQUENCE] MS confirmado por sequência: \"{normalized}\"");
+            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA");
+            StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
+
+            // Aqui a troca de recognizer é proposital: a wake word terminou e
+            // o usuário deve falar o comando após o bip.
+            ResetRecognizer(wakeOnly: false);
+            return true;
+        }
+
+        return false;
     }
 
     private static string ExtractCommandAfterWake(string value)
