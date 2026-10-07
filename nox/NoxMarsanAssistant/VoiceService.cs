@@ -418,12 +418,23 @@ public sealed class VoiceService : IDisposable
         }
 
         var normalized = Normalize(text);
+        var wakeNormalized = VoiceTextNormalizer.Normalize(normalized).Trim();
 
-        if (!commandMode && TryHandleWakeSequence(normalized, isPartial))
-            return;
-
-        if (!commandMode)
+        if (!commandMode && !trainingMode)
         {
+            // O recognizer em idle usa uma gramática fechada somente para Grok.
+            // Portanto, qualquer uma destas hipóteses ativa diretamente,
+            // sem passar por uma segunda máquina de decisão.
+            var directWake = wakeNormalized is "grok" or "groque" or "grock" or "grog" or "croque";
+
+            if (directWake)
+            {
+                DiagnosticLog?.Invoke(
+                    $"[WAKE RAW] texto=\"{text}\" • normalizado=\"{wakeNormalized}\" • parcial={isPartial}");
+                ActivateWake(wakeNormalized);
+                return;
+            }
+
             if (ShouldReportWaitingTranscript(text, isPartial))
                 HeardWhileWaiting?.Invoke(text);
             return;
@@ -631,32 +642,11 @@ public sealed class VoiceService : IDisposable
         recognizer.SetWords(true);
     }
 
-    private bool TryHandleWakeSequence(string normalized, bool isPartial)
-    {
-        if (state is AssistantState.Processing or AssistantState.Speaking or
-            AssistantState.Cooldown or AssistantState.Listening or AssistantState.Guard)
-            return false;
-
-        var n = VoiceTextNormalizer.Normalize(normalized).Trim();
-        if (string.IsNullOrWhiteSpace(n))
-            return false;
-
-        // Wake word de palavra única. Com a gramática fechada do Vosk,
-        // qualquer uma destas formas representa "Grok".
-        var accepted = n is "grok" or "groque" or "grock" or "grog" or "croque";
-        if (!accepted)
-            return false;
-
-        // Resultado parcial exato já é suficiente: não precisamos esperar
-        // o Vosk encerrar a frase e isso deixa a ativação muito mais rápida.
-        ActivateWake(n);
-        return true;
-    }
-
     private void ActivateWake(string heard)
     {
         wakeSequenceArmed = false;
         consecutiveWakeHits = 0;
+        SetState(AssistantState.Idle);
 
         PlayActivationTone();
         DiagnosticLog?.Invoke($"[WAKE] GROK confirmado: \"{heard}\"");
