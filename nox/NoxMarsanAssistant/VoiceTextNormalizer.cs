@@ -8,10 +8,10 @@ public static class VoiceTextNormalizer
 {
     private static readonly HashSet<string> Fillers = new(StringComparer.OrdinalIgnoreCase)
     {
-        "por", "favor", "pra", "para", "mim", "aí", "ai", "agora",
+        "por", "favor", "pra", "para", "mim", "ai", "agora",
         "pode", "poderia", "quero", "queria", "eu", "uma", "um",
         "a", "o", "as", "os", "da", "do", "de", "das", "dos",
-        "essa", "esse", "esta", "este", "lá", "la"
+        "essa", "esse", "esta", "este", "la"
     };
 
     public static string Normalize(string? value, bool removeFillers = false)
@@ -28,8 +28,8 @@ public static class VoiceTextNormalizer
         }
 
         var normalized = sb.ToString().Normalize(NormalizationForm.FormC);
-        normalized = Regex.Replace(normalized, @"[^a-z0-9s]", " ");
-        normalized = Regex.Replace(normalized, @"s+", " ").Trim();
+        normalized = Regex.Replace(normalized, @"[^a-z0-9\s]", " ");
+        normalized = Regex.Replace(normalized, @"\s+", " ").Trim();
 
         if (!removeFillers) return normalized;
 
