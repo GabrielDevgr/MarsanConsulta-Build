@@ -182,7 +182,7 @@ public sealed class VoiceService : IDisposable
             commandMode = false;
             trainingStartedAt = DateTime.Now;
             ResetRecognizer(wakeOnly: false);
-            SystemSounds.Asterisk.Play();
+            PlayActivationTone();
             StatusChanged?.Invoke("Treinamento • fale o nome agora...");
         }
     }
@@ -392,7 +392,7 @@ public sealed class VoiceService : IDisposable
                 var inlineCommand = ExtractCommandAfterWake(normalized);
                 if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
                 {
-                    SystemSounds.Asterisk.Play();
+                    PlayActivationTone();
                     DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
                     DiagnosticLog?.Invoke($"[MS ATIVADO] Comando na mesma frase: \"{inlineCommand}\"");
                     StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
@@ -401,9 +401,9 @@ public sealed class VoiceService : IDisposable
                     return;
                 }
 
-                SystemSounds.Asterisk.Play();
+                PlayActivationTone();
                 DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
-                DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
+                DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
                 StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
                 BeginWhisperCommandCapture();
             }
@@ -610,7 +610,7 @@ public sealed class VoiceService : IDisposable
             var inlineCommand = ExtractCommandAfterWake(normalized);
             if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
             {
-                SystemSounds.Asterisk.Play();
+                PlayActivationTone();
                 DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
                 DiagnosticLog?.Invoke($"[MS ATIVADO] Comando na mesma frase: \"{inlineCommand}\"");
                 StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
@@ -619,9 +619,9 @@ public sealed class VoiceService : IDisposable
                 return;
             }
 
-            SystemSounds.Asterisk.Play();
+            PlayActivationTone();
             DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
-            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
+            DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
             StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
             BeginWhisperCommandCapture();
             return;
@@ -665,9 +665,9 @@ public sealed class VoiceService : IDisposable
         {
             wakeSequenceArmed = false;
 
-            SystemSounds.Asterisk.Play();
+            PlayActivationTone();
             DiagnosticLog?.Invoke($"[WAKE SEQUENCE] MS confirmado por sequência: \"{normalized}\"");
-            DiagnosticLog?.Invoke("[MS ATIVADO] FALE O COMANDO AGORA • Whisper");
+            DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
             StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
             BeginWhisperCommandCapture();
             return true;
@@ -851,6 +851,65 @@ public sealed class VoiceService : IDisposable
             System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark);
 
         return new string(chars.ToArray()).Normalize(System.Text.NormalizationForm.FormC);
+    }
+
+    private static void PlayActivationTone()
+    {
+        try
+        {
+            const int sampleRate = 16000;
+            const int durationMs = 180;
+            const double frequency = 880.0;
+            const short amplitude = 9000;
+
+            var sampleCount = sampleRate * durationMs / 1000;
+            var dataSize = sampleCount * 2;
+
+            using var ms = new MemoryStream(44 + dataSize);
+            using var bw = new BinaryWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+            bw.Write(36 + dataSize);
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+            bw.Write(16);
+            bw.Write((short)1);
+            bw.Write((short)1);
+            bw.Write(sampleRate);
+            bw.Write(sampleRate * 2);
+            bw.Write((short)2);
+            bw.Write((short)16);
+            bw.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+            bw.Write(dataSize);
+
+            for (var i = 0; i < sampleCount; i++)
+            {
+                var envelope = 1.0;
+                var fadeSamples = sampleRate * 20 / 1000;
+
+                if (i < fadeSamples)
+                    envelope = (double)i / fadeSamples;
+                else if (i > sampleCount - fadeSamples)
+                    envelope = (double)(sampleCount - i) / fadeSamples;
+
+                var sample = (short)(
+                    Math.Sin(2 * Math.PI * frequency * i / sampleRate) *
+                    amplitude *
+                    Math.Clamp(envelope, 0, 1));
+
+                bw.Write(sample);
+            }
+
+            bw.Flush();
+            ms.Position = 0;
+
+            using var player = new SoundPlayer(ms);
+            player.PlaySync();
+        }
+        catch
+        {
+            try { Console.Beep(880, 180); } catch { }
+        }
     }
 
     private static SpeechSynthesizer? CreateSynthesizerSafe()
