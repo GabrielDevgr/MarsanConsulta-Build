@@ -114,7 +114,7 @@ public sealed class VoiceService : IDisposable
             ResetRecognizer(wakeOnly: true);
 
             waveIn.StartRecording();
-            StatusChanged?.Invoke("Aguardando “MARSAN”...");
+            StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
         }
         catch (Exception ex)
         {
@@ -304,7 +304,7 @@ public sealed class VoiceService : IDisposable
                 {
                     commandMode = false;
                     ResetRecognizer(wakeOnly: true);
-                    StatusChanged?.Invoke("Tempo esgotado. Diga “MARSAN” novamente.");
+                    StatusChanged?.Invoke("Tempo esgotado. Diga “MS” novamente.");
                 }
             }
             catch (Exception ex)
@@ -345,7 +345,7 @@ public sealed class VoiceService : IDisposable
                     if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
                     {
                         SystemSounds.Asterisk.Play();
-                        StatusChanged?.Invoke($"MARSAN ativado • ouvi: {inlineCommand}");
+                        StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
                         CommandRecognized?.Invoke(inlineCommand);
                         ResetRecognizer(wakeOnly: true);
                         return;
@@ -356,8 +356,8 @@ public sealed class VoiceService : IDisposable
                 commandStartedAt = DateTime.Now;
 
                 SystemSounds.Asterisk.Play();
-                DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | Marsan | Score: {wakeScore:P0}");
-                StatusChanged?.Invoke($"MARSAN ativado • {wakeScore:P0} • ouvindo comando...");
+                DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
+                StatusChanged?.Invoke($"MS ativado • {wakeScore:P0} • ouvindo comando...");
                 ResetRecognizer(wakeOnly: false);
             }
             else
@@ -399,10 +399,11 @@ public sealed class VoiceService : IDisposable
 
         if (wakeOnly)
         {
-            // Em modo de espera limitamos o vocabulário para aumentar muito a chance
-            // de reconhecer palavras curtas/nome próprio como MARSAN e NOX.
+            // Em modo de espera priorizamos a wake word MS ("ême ésse").
+            // Mantemos o reconhecedor livre em paralelo para captar variações
+            // que a gramática restrita não produzir.
             var wakeWords = MarsanVocabulary.GetWakeAliases()
-                .Concat(new[] { "mar san", "nox", "nocs", "nocks", "noques", "nos", "noz", "[unk]" })
+                .Concat(new[] { "eme esse", "eme se", "m s", "ms", "[unk]" })
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             var grammar = JsonSerializer.Serialize(wakeWords);
@@ -432,9 +433,8 @@ public sealed class VoiceService : IDisposable
         // Reforços fonéticos observáveis no reconhecimento livre. Não são
         // suficientes sozinhos se estiverem muito distantes, evitando
         // ativações aleatórias.
-        var compact = normalized.Replace(" ", "");
         var phonetic = PortuguesePhonetics.Encode(normalized);
-        var wakePhonetic = PortuguesePhonetics.Encode("marsan");
+        var wakePhonetic = PortuguesePhonetics.Encode("eme esse");
         var phoneticScore = VoiceSimilarity.PhoneticSimilarity(phonetic, wakePhonetic);
         var combined = Math.Max(score, phoneticScore);
 
@@ -443,8 +443,8 @@ public sealed class VoiceService : IDisposable
             commandMode = true;
             commandStartedAt = DateTime.Now;
             SystemSounds.Asterisk.Play();
-            DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | Score: {combined:P0}");
-            StatusChanged?.Invoke($"MARSAN ativado • {combined:P0} • ouvindo comando...");
+            DiagnosticLog?.Invoke($"[WAKE FALLBACK] Texto livre: \"{text}\" | MS | Score: {combined:P0}");
+            StatusChanged?.Invoke($"MS ativado • {combined:P0} • ouvindo comando...");
             ResetRecognizer(wakeOnly: false);
             return;
         }
