@@ -12,12 +12,14 @@
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishTrimmed>false</PublishTrimmed>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Company>Marsan Madeiras</Company>
     <Product>NOX Marsan Assistant</Product>
-    <Description>Assistente de voz e central de impressão da Marsan Madeiras</Description>
+    <Description>Assistente de voz offline e central de impressão da Marsan Madeiras</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Speech" Version="8.0.0" />
+    <PackageReference Include="Vosk" Version="0.3.38" />
+    <PackageReference Include="NAudio" Version="3.1.0" />
   </ItemGroup>
 </Project>
