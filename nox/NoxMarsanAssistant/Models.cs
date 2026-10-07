@@ -38,4 +38,5 @@ public sealed record NoxCommandResult(
     bool Success,
     string Message,
     bool RequiresConfirmation = false,
-    IReadOnlyList<string>? Diagnostics = null);
+    IReadOnlyList<string>? Diagnostics = null,
+    string? Target = null);
