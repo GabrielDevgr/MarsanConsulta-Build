@@ -82,7 +82,7 @@ public sealed class MarsanApiClient
     public async Task<JsonDocument> GetConsultaDataAsync(NoxConfig cfg, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(cfg.ConsultaApiKey))
-            throw new InvalidOperationException("Configure a chave da API Marsan Consulta no NOX.");
+            throw new InvalidOperationException("Configure a chave da API Marsan Consulta no MARSAN.");
 
         var url = $"{cfg.ApiBaseUrl.TrimEnd('/')}/api/consulta-planilhas";
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -111,7 +111,7 @@ public sealed class MarsanApiClient
             documentFormat = "html",
             documentContent = html,
             copies = Math.Max(1, copies),
-            requestedBy = "NOX Marsan Assistant"
+            requestedBy = "MARSAN Assistant"
         }), Encoding.UTF8, "application/json");
 
         using var res = await http.SendAsync(req, ct);
