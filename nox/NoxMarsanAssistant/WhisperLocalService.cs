@@ -10,7 +10,7 @@ public sealed class WhisperLocalService : IDisposable
         "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-x64.zip";
 
     private const string WhisperModelUrl =
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin";
 
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(20) };
     private readonly SemaphoreSlim prepareLock = new(1, 1);
@@ -24,7 +24,7 @@ public sealed class WhisperLocalService : IDisposable
 
     private static string BinFolder => Path.Combine(BaseFolder, "bin");
     private static string ModelFolder => Path.Combine(BaseFolder, "models");
-    private static string ModelPath => Path.Combine(ModelFolder, "ggml-base.bin");
+    private static string ModelPath => Path.Combine(ModelFolder, "ggml-small.bin");
 
     public event Action<string>? StatusChanged;
     public event Action<string>? DiagnosticLog;
@@ -49,7 +49,7 @@ public sealed class WhisperLocalService : IDisposable
                 await DownloadFileAsync(
                     WhisperModelUrl,
                     ModelPath,
-                    "Baixando modelo Whisper base • cerca de 142 MB",
+                    "Baixando modelo Whisper small • cerca de 466 MB",
                     ct);
 
             var exe = FindWhisperExecutable();
@@ -96,16 +96,10 @@ public sealed class WhisperLocalService : IDisposable
             await WriteWavAsync(wavPath, pcm16KhzMono16Bit, ct);
 
             var threads = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
-            const string domainPrompt =
-                "Comandos da Marsan Madeiras. Imprima, imprimir, planilha, Santa Clara, Santa Clara NFE, " +
-                "Gape Embalagens, Lixo Osli, Madeira Adenir, Serragem Gelenski, Toras Guse, Toras Aza, " +
-                "Toras Valnei, Toras Jucoski, Madeira Tioto, Cheques.";
-
             var args =
                 $"-m \"{ModelPath}\" " +
                 $"-f \"{wavPath}\" " +
                 "-l pt -nt -otxt " +
-                $"-p \"{domainPrompt}\" " +
                 $"-of \"{outputPrefix}\" " +
                 $"-t {threads}";
 
