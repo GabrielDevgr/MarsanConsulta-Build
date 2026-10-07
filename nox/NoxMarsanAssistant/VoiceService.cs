@@ -14,6 +14,7 @@ public sealed class VoiceService : IDisposable
 
     private readonly object sync = new();
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly SemaphoreSlim initLock = new(1, 1);
 
     private WaveInEvent? waveIn;
     private Model? model;
@@ -38,8 +39,12 @@ public sealed class VoiceService : IDisposable
 
     public async Task<bool> InitializeAsync(CancellationToken ct = default)
     {
+        await initLock.WaitAsync(ct);
         try
         {
+            if (model is not null)
+                return true;
+
             Directory.CreateDirectory(Path.Combine(BaseFolder, "models"));
 
             if (!Directory.Exists(ModelPath) || !File.Exists(Path.Combine(ModelPath, "am", "final.mdl")))
@@ -61,6 +66,10 @@ public sealed class VoiceService : IDisposable
         {
             ErrorOccurred?.Invoke(ex.Message);
             return false;
+        }
+        finally
+        {
+            initLock.Release();
         }
     }
 
@@ -146,30 +155,34 @@ public sealed class VoiceService : IDisposable
         {
             StatusChanged?.Invoke("Baixando modelo de voz PT-BR • aproximadamente 31 MB...");
 
-            using var response = await http.GetAsync(ModelZipUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
-
-            var total = response.Content.Headers.ContentLength;
-            await using var source = await response.Content.ReadAsStreamAsync(ct);
-            await using var target = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
-
-            var buffer = new byte[81920];
-            long readTotal = 0;
-            int read;
-
-            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            using (var response = await http.GetAsync(ModelZipUrl, HttpCompletionOption.ResponseHeadersRead, ct))
             {
-                await target.WriteAsync(buffer.AsMemory(0, read), ct);
-                readTotal += read;
+                response.EnsureSuccessStatusCode();
 
-                if (total is > 0)
+                var total = response.Content.Headers.ContentLength;
+
+                await using (var source = await response.Content.ReadAsStreamAsync(ct))
+                await using (var target = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
                 {
-                    var pct = (int)Math.Clamp(readTotal * 100 / total.Value, 0, 100);
-                    StatusChanged?.Invoke($"Baixando modelo de voz PT-BR • {pct}%");
+                    var buffer = new byte[81920];
+                    long readTotal = 0;
+                    int read;
+
+                    while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                    {
+                        await target.WriteAsync(buffer.AsMemory(0, read), ct);
+                        readTotal += read;
+
+                        if (total is > 0)
+                        {
+                            var pct = (int)Math.Clamp(readTotal * 100 / total.Value, 0, 100);
+                            StatusChanged?.Invoke($"Baixando modelo de voz PT-BR • {pct}%");
+                        }
+                    }
+
+                    await target.FlushAsync(ct);
                 }
             }
-
-            await target.FlushAsync(ct);
 
             StatusChanged?.Invoke("Instalando modelo de voz...");
             Directory.CreateDirectory(tempFolder);
@@ -353,6 +366,7 @@ public sealed class VoiceService : IDisposable
         try { recognizer?.Dispose(); } catch { }
         try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
+        initLock.Dispose();
         http.Dispose();
     }
 }
