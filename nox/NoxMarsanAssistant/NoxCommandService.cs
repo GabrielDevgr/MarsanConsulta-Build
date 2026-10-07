@@ -63,7 +63,7 @@ public sealed class NoxCommandService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var entities = MarsanVocabulary.BuildEntities(accounts);
+        var entities = MarsanVocabulary.BuildEntities(accounts, VoiceTrainingStore.Load());
         var interpretation = interpreter.Interpret(
             command,
             entities,
