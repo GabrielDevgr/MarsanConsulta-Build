@@ -181,7 +181,7 @@ public sealed class NoxCommandService
             ? $"Certo. Enviei {copies} cópias de {customer} para impressão."
             : $"Certo. Enviei a planilha de {customer} para impressão.";
 
-        return new(true, message, false, diagnostics);
+        return new(true, message, false, diagnostics, customer);
     }
 
     private static int ExtractCopies(string command)
