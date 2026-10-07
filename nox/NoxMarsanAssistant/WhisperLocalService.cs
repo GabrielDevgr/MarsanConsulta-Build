@@ -96,10 +96,16 @@ public sealed class WhisperLocalService : IDisposable
             await WriteWavAsync(wavPath, pcm16KhzMono16Bit, ct);
 
             var threads = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
+            const string domainPrompt =
+                "Comandos da Marsan Madeiras. Imprima, imprimir, planilha, Santa Clara, Santa Clara NFE, " +
+                "Gape Embalagens, Lixo Osli, Madeira Adenir, Serragem Gelenski, Toras Guse, Toras Aza, " +
+                "Toras Valnei, Toras Jucoski, Madeira Tioto, Cheques.";
+
             var args =
                 $"-m \"{ModelPath}\" " +
                 $"-f \"{wavPath}\" " +
                 "-l pt -nt -otxt " +
+                $"-p \"{domainPrompt}\" " +
                 $"-of \"{outputPrefix}\" " +
                 $"-t {threads}";
 
