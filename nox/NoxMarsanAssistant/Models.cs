@@ -8,10 +8,11 @@ public sealed class NoxConfig
     public string AgentId { get; set; } = Environment.MachineName;
     public string AgentToken { get; set; } = "";
     public string ConsultaApiKey { get; set; } = "";
+    public string GroqApiKey { get; set; } = "";
     public int PollSeconds { get; set; } = 10;
     public bool AutoStart { get; set; } = true;
     public bool StartListeningOnLaunch { get; set; } = true;
-    public bool VoiceResponses { get; set; } = true;
+    public bool VoiceResponses { get; set; } = false;
     public string OutputFolder { get; set; } = @"C:\MarsanPrint\Impressos";
     public string PrinterName { get; set; } = "";
     public bool SavePdfInsteadOfPrint { get; set; } = false;
