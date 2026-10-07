@@ -28,12 +28,14 @@ public sealed class VoiceService : IDisposable
     private DateTime lastWaitingLogAt = DateTime.MinValue;
     private bool trainingMode;
     private DateTime trainingStartedAt = DateTime.MinValue;
+    private VoiceRecognitionSettings recognitionSettings = new();
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
     public event Action<string>? ErrorOccurred;
     public event Action<string>? HeardWhileWaiting;
     public event Action<string>? TrainingSampleRecognized;
+    public event Action<string>? DiagnosticLog;
 
     public bool IsRunning => running;
     public string RecognizerName { get; private set; } = "Vosk PT-BR offline";
@@ -79,9 +81,10 @@ public sealed class VoiceService : IDisposable
         }
     }
 
-    public async Task StartAsync(CancellationToken ct = default)
+    public async Task StartAsync(VoiceRecognitionSettings? settings = null, CancellationToken ct = default)
     {
         if (running) return;
+        recognitionSettings = settings ?? new VoiceRecognitionSettings();
 
         try
         {
@@ -307,7 +310,8 @@ public sealed class VoiceService : IDisposable
 
         if (!commandMode)
         {
-            var wakeToken = FindWakeToken(normalized);
+            var wakeScore = MarsanVocabulary.WakeScore(normalized);
+            var wakeToken = wakeScore >= recognitionSettings.WakeExecuteThreshold ? normalized : null;
 
             if (wakeToken is not null)
             {
@@ -328,7 +332,8 @@ public sealed class VoiceService : IDisposable
                 commandStartedAt = DateTime.Now;
 
                 SystemSounds.Asterisk.Play();
-                StatusChanged?.Invoke("MARSAN ativado • ouvindo comando...");
+                DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | Marsan | Score: {wakeScore:P0}");
+                StatusChanged?.Invoke($"MARSAN ativado • {wakeScore:P0} • ouvindo comando...");
                 ResetRecognizer(wakeOnly: false);
             }
             else
@@ -370,14 +375,11 @@ public sealed class VoiceService : IDisposable
         {
             // Em modo de espera limitamos o vocabulário para aumentar muito a chance
             // de reconhecer palavras curtas/nome próprio como MARSAN e NOX.
-            var grammar = JsonSerializer.Serialize(new[]
-            {
-                "marsan", "marsam", "mar san", "marcam", "marcan",
-                "marçal", "marcao", "marção", "marsa", "marson",
-                "maçã", "maca", "massan",
-                "nox", "nocs", "nocks", "noques", "nos", "noz", "nós", "nois",
-                "[unk]"
-            });
+            var wakeWords = MarsanVocabulary.GetWakeAliases()
+                .Concat(new[] { "mar san", "nox", "nocs", "nocks", "noques", "nos", "noz", "[unk]" })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var grammar = JsonSerializer.Serialize(wakeWords);
 
             recognizer = new VoskRecognizer(model, 16000.0f, grammar);
         }
