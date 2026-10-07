@@ -25,6 +25,11 @@ public sealed class MainForm : Form
     private readonly CheckBox savePdf = new();
     private readonly NumericUpDown poll = new();
     private readonly Button voiceToggle = new();
+    private readonly ComboBox trainingTerm = new();
+    private readonly ListBox trainingSamples = new();
+    private readonly TextBox trainingManualSample = new();
+    private readonly Label trainingInfo = new();
+    private readonly Button recordTraining = new();
     private readonly Panel contentHost = new();
     private readonly Dictionary<string, Button> navButtons = new();
 
@@ -84,6 +89,21 @@ public sealed class MainForm : Form
         {
             command.Text = text;
             await ExecuteCommandTextAsync(text, true);
+        });
+
+        voice.TrainingSampleRecognized += sample => Ui(() =>
+        {
+            var canonical = trainingTerm.SelectedItem?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(canonical))
+            {
+                trainingInfo.Text = $"Ouvi “{sample}”, mas nenhum termo está selecionado.";
+                return;
+            }
+
+            VoiceTrainingStore.AddSample(canonical, sample);
+            trainingInfo.Text = $"Aprendido: “{sample}” → {canonical}";
+            Log("TREINO", $"{sample} → {canonical}");
+            RefreshTrainingSamples();
         });
 
         var menu = new ContextMenuStrip();
@@ -150,7 +170,7 @@ public sealed class MainForm : Form
         var nav = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 250,
+            Height = 315,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             BackColor = Sidebar,
@@ -159,13 +179,14 @@ public sealed class MainForm : Form
 
         nav.Controls.Add(CreateNavButton("assistant", "✦   Assistente"));
         nav.Controls.Add(CreateNavButton("print", "▣   Impressão"));
+        nav.Controls.Add(CreateNavButton("training", "◉   Treinamento"));
         nav.Controls.Add(CreateNavButton("settings", "⚙   Configurações"));
 
         var footer = new Panel { Dock = DockStyle.Bottom, Height = 74, BackColor = Sidebar };
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.4.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "v0.5.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -255,6 +276,7 @@ public sealed class MainForm : Form
         Control body = page switch
         {
             "print" => BuildPrintPage(),
+            "training" => BuildTrainingPage(),
             "settings" => BuildSettingsPage(),
             _ => BuildAssistantPage()
         };
@@ -266,6 +288,7 @@ public sealed class MainForm : Form
             title.Text = page switch
             {
                 "print" => "Central de impressão",
+                "training" => "Treinamento de voz",
                 "settings" => "Configurações",
                 _ => "Assistente"
             };
@@ -423,6 +446,157 @@ public sealed class MainForm : Form
         actions.Controls.AddRange(new Control[] { start, stop, test, folder });
         root.Controls.AddRange(new Control[] { statusCard, outputCard, printerCard, actions });
         return root;
+    }
+
+    private Control BuildTrainingPage()
+    {
+        var root = new Panel { BackColor = Bg };
+
+        var intro = new RoundedPanel { Left = 0, Top = 0, Width = 820, Height = 140, BackColor = Sidebar, Radius = 22, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+        intro.Controls.Add(new Label
+        {
+            Text = "Treinamento de voz",
+            Left = 28,
+            Top = 24,
+            AutoSize = true,
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI Semibold", 21, FontStyle.Bold)
+        });
+        intro.Controls.Add(new Label
+        {
+            Text = "Ensine ao MARSAN como diferentes pessoas pronunciam nomes de clientes, fornecedores e planilhas.",
+            Left = 30,
+            Top = 66,
+            AutoSize = true,
+            ForeColor = Color.FromArgb(190, 211, 200),
+            Font = new Font("Segoe UI", 10.2f)
+        });
+        intro.Controls.Add(new Label
+        {
+            Text = "As amostras ficam somente neste computador e são usadas como dicionário fonético local.",
+            Left = 30,
+            Top = 94,
+            AutoSize = true,
+            ForeColor = Color.FromArgb(148, 180, 164),
+            Font = new Font("Segoe UI", 9)
+        });
+
+        var termCard = CreateCard("1. Escolha o termo", 0, 160, 395, 195);
+        trainingTerm.SetBounds(24, 58, 345, 34);
+        trainingTerm.DropDownStyle = ComboBoxStyle.DropDownList;
+        trainingTerm.Font = new Font("Segoe UI", 10);
+        trainingTerm.SelectedIndexChanged -= TrainingTermChanged;
+        trainingTerm.SelectedIndexChanged += TrainingTermChanged;
+
+        trainingInfo.SetBounds(24, 104, 345, 58);
+        trainingInfo.ForeColor = Muted;
+        trainingInfo.Text = "Selecione um termo e grave diferentes pronúncias.";
+        termCard.Controls.AddRange(new Control[] { trainingTerm, trainingInfo });
+
+        var recordCard = CreateCard("2. Grave uma amostra", 415, 160, 405, 195);
+        recordCard.Controls.Add(new Label
+        {
+            Text = "Fale somente o nome, por exemplo: “Toras Aza”.",
+            Left = 24,
+            Top = 56,
+            AutoSize = true,
+            ForeColor = Muted
+        });
+
+        recordTraining.Text = "●  Gravar amostra";
+        recordTraining.SetBounds(24, 94, 175, 42);
+        StylePrimaryButton(recordTraining);
+        recordTraining.Click -= RecordTrainingClick;
+        recordTraining.Click += RecordTrainingClick;
+
+        var addText = new Button { Text = "Adicionar por texto", Left = 214, Top = 94, Width = 160, Height = 42 };
+        addText.FlatStyle = FlatStyle.Flat;
+        addText.FlatAppearance.BorderColor = Border;
+        addText.BackColor = Color.White;
+        addText.ForeColor = TextColor;
+        addText.Click += (_, _) => AddManualTrainingSample();
+
+        trainingManualSample.SetBounds(24, 145, 350, 30);
+        trainingManualSample.PlaceholderText = "Ex.: horas ásia";
+        recordCard.Controls.AddRange(new Control[] { recordTraining, addText, trainingManualSample });
+
+        var samplesCard = CreateCard("3. Pronúncias aprendidas", 0, 375, 820, 245);
+        trainingSamples.SetBounds(24, 58, 610, 155);
+        trainingSamples.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+        trainingSamples.Font = new Font("Segoe UI", 10);
+        trainingSamples.BorderStyle = BorderStyle.FixedSingle;
+
+        var remove = new Button { Text = "Remover", Left = 650, Top = 58, Width = 140, Height = 38, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        remove.FlatStyle = FlatStyle.Flat;
+        remove.FlatAppearance.BorderColor = Border;
+        remove.BackColor = Color.White;
+        remove.ForeColor = TextColor;
+        remove.Click += (_, _) =>
+        {
+            var canonical = trainingTerm.SelectedItem?.ToString() ?? "";
+            var sample = trainingSamples.SelectedItem?.ToString() ?? "";
+            if (canonical.Length == 0 || sample.Length == 0) return;
+            VoiceTrainingStore.RemoveSample(canonical, sample);
+            RefreshTrainingSamples();
+        };
+
+        samplesCard.Controls.AddRange(new Control[] { trainingSamples, remove });
+        root.Controls.AddRange(new Control[] { intro, termCard, recordCard, samplesCard });
+
+        trainingTerm.Items.Clear();
+        foreach (var term in VoiceTrainingStore.GetCanonicalTerms())
+            trainingTerm.Items.Add(term);
+        if (trainingTerm.Items.Count > 0)
+            trainingTerm.SelectedIndex = 0;
+
+        return root;
+    }
+
+    private void TrainingTermChanged(object? sender, EventArgs e) => RefreshTrainingSamples();
+
+    private async void RecordTrainingClick(object? sender, EventArgs e)
+    {
+        if (trainingTerm.SelectedItem is null)
+        {
+            trainingInfo.Text = "Selecione o termo que será treinado.";
+            return;
+        }
+
+        if (!voice.IsRunning)
+            await StartVoiceAsync();
+
+        if (!voice.IsRunning)
+        {
+            trainingInfo.Text = "Não foi possível ativar o microfone.";
+            return;
+        }
+
+        trainingInfo.Text = $"Fale agora: {trainingTerm.SelectedItem}";
+        voice.BeginTrainingSample();
+    }
+
+    private void AddManualTrainingSample()
+    {
+        var canonical = trainingTerm.SelectedItem?.ToString() ?? "";
+        var sample = trainingManualSample.Text.Trim();
+        if (canonical.Length == 0 || sample.Length == 0) return;
+
+        VoiceTrainingStore.AddSample(canonical, sample);
+        trainingManualSample.Clear();
+        trainingInfo.Text = $"Aprendido: “{sample}” → {canonical}";
+        RefreshTrainingSamples();
+    }
+
+    private void RefreshTrainingSamples()
+    {
+        if (trainingTerm.SelectedItem is null) return;
+        var canonical = trainingTerm.SelectedItem.ToString() ?? "";
+
+        trainingSamples.Items.Clear();
+        foreach (var sample in VoiceTrainingStore.GetSamples(canonical))
+            trainingSamples.Items.Add(sample);
+
+        trainingInfo.Text = $"{trainingSamples.Items.Count} pronúncia(s) cadastrada(s) para {canonical}.";
     }
 
     private Control BuildSettingsPage()
