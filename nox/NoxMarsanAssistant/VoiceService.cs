@@ -47,6 +47,7 @@ public sealed class VoiceService : IDisposable
     private bool wakeSequenceArmed;
     private MemoryStream? commandPcm;
     private bool commandSpeechStarted;
+    private DateTime commandSpeechStartedAt = DateTime.MinValue;
     private DateTime lastCommandVoiceAt = DateTime.MinValue;
     private bool whisperBusy;
     private DateTime suppressRecognitionUntil = DateTime.MinValue;
@@ -351,6 +352,7 @@ public sealed class VoiceService : IDisposable
                     commandMode = true;
                     commandStartedAt = now;
                     commandSpeechStarted = false;
+                    commandSpeechStartedAt = DateTime.MinValue;
                     lastCommandVoiceAt = DateTime.MinValue;
                 }
 
@@ -445,9 +447,12 @@ public sealed class VoiceService : IDisposable
         commandMode = true;
         commandStartedAt = DateTime.Now;
         commandSpeechStarted = false;
+        commandSpeechStartedAt = DateTime.MinValue;
         lastCommandVoiceAt = DateTime.MinValue;
 
-        commandVoiceThreshold = Math.Clamp(ambientRms * 2.8, 550.0, 2200.0);
+        // Depois que o usuário chamou "Grok", podemos ser muito mais sensíveis:
+        // falso positivo aqui é barato, cortar a fala é caro.
+        commandVoiceThreshold = Math.Clamp(ambientRms * 2.2, 300.0, 1400.0);
 
         commandPcm?.Dispose();
         commandPcm = new MemoryStream(capacity: 32000 * 4);
@@ -466,7 +471,7 @@ public sealed class VoiceService : IDisposable
 
     private void CaptureWhisperCommand(byte[] buffer, int bytesRecorded)
     {
-        commandPcm ??= new MemoryStream(capacity: 32000 * 8);
+        commandPcm ??= new MemoryStream(capacity: 32000 * 5);
         commandPcm.Write(buffer, 0, bytesRecorded);
 
         var rms = CalculatePcmRms(buffer, bytesRecorded);
@@ -474,22 +479,40 @@ public sealed class VoiceService : IDisposable
 
         if (rms >= commandVoiceThreshold)
         {
-            commandSpeechStarted = true;
+            if (!commandSpeechStarted)
+            {
+                commandSpeechStarted = true;
+                commandSpeechStartedAt = now;
+                DiagnosticLog?.Invoke($"[VAD] início de fala • rms={rms:F0}");
+            }
+
             lastCommandVoiceAt = now;
         }
 
         var elapsed = now - commandStartedAt;
+        var speechElapsed = commandSpeechStartedAt == DateTime.MinValue
+            ? TimeSpan.Zero
+            : now - commandSpeechStartedAt;
+
         var silenceAfterSpeech =
             commandSpeechStarted &&
             lastCommandVoiceAt != DateTime.MinValue &&
-            now - lastCommandVoiceAt >= TimeSpan.FromMilliseconds(600);
+            now - lastCommandVoiceAt >= TimeSpan.FromMilliseconds(850);
 
-        var noSpeechTimeout = !commandSpeechStarted && elapsed >= TimeSpan.FromSeconds(1.6);
+        // Mesmo que haja uma pausa curta após "imprima", não encerramos antes
+        // de pelo menos 1,6s desde o início real da fala.
+        var canEndAfterSilence =
+            silenceAfterSpeech &&
+            speechElapsed >= TimeSpan.FromMilliseconds(1600);
 
-        if ((silenceAfterSpeech && elapsed >= TimeSpan.FromMilliseconds(700)) ||
+        var noSpeechTimeout = !commandSpeechStarted && elapsed >= TimeSpan.FromSeconds(2.0);
+
+        if (canEndAfterSilence ||
             noSpeechTimeout ||
-            elapsed >= TimeSpan.FromSeconds(3.2))
+            elapsed >= TimeSpan.FromSeconds(4.2))
         {
+            DiagnosticLog?.Invoke(
+                $"[VAD] fim de comando • total={elapsed.TotalSeconds:F1}s • fala={speechElapsed.TotalSeconds:F1}s");
             FinishWhisperCommandCapture();
         }
     }
