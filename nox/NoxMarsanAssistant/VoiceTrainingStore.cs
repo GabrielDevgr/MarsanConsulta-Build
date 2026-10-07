@@ -5,11 +5,6 @@ using System.Text.RegularExpressions;
 
 namespace NoxMarsanAssistant;
 
-public sealed class VoiceTrainingProfile
-{
-    public Dictionary<string, List<string>> Terms { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-}
-
 public static class VoiceTrainingStore
 {
     private static readonly object Sync = new();
