@@ -7,18 +7,23 @@ public sealed class MainForm : Form
     private NoxConfig cfg = ConfigStore.Load();
     private readonly PrintAgentService printService = new();
     private readonly NoxCommandService nox = new();
+    private readonly VoiceService voice = new();
     private readonly NotifyIcon tray = new();
 
     private readonly Label agentStatus = new();
     private readonly Label noxStatus = new();
+    private readonly Label voiceStatus = new();
     private readonly TextBox command = new();
     private readonly TextBox output = new();
     private readonly ComboBox printers = new();
     private readonly TextBox agentToken = new();
     private readonly TextBox consultaKey = new();
     private readonly CheckBox autoStart = new();
+    private readonly CheckBox autoListen = new();
+    private readonly CheckBox voiceResponses = new();
     private readonly CheckBox savePdf = new();
     private readonly NumericUpDown poll = new();
+    private readonly Button voiceToggle = new();
     private bool reallyExit;
 
     private static readonly Color Green = Color.FromArgb(20, 72, 51);
@@ -47,8 +52,27 @@ public sealed class MainForm : Form
             Log("PRINT", s);
         }));
 
+        voice.StatusChanged += s => BeginInvoke(new Action(() =>
+        {
+            voiceStatus.Text = s;
+            noxStatus.Text = s;
+        }));
+
+        voice.ErrorOccurred += s => BeginInvoke(new Action(() =>
+        {
+            voiceStatus.Text = "Erro de voz";
+            Log("VOZ", s);
+        }));
+
+        voice.CommandRecognized += text => BeginInvoke(new Action(async () =>
+        {
+            command.Text = text;
+            await ExecuteCommandTextAsync(text, true);
+        }));
+
         var menu = new ContextMenuStrip();
         menu.Items.Add("Abrir NOX", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
+        menu.Items.Add("Ativar/desativar voz", null, (_, _) => ToggleVoice());
         menu.Items.Add("Executar comando", null, (_, _) => { Show(); command.Focus(); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sair", null, (_, _) => { reallyExit = true; Close(); });
@@ -61,6 +85,9 @@ public sealed class MainForm : Form
 
         if (!string.IsNullOrWhiteSpace(cfg.AgentToken))
             printService.Start(() => cfg);
+
+        if (cfg.StartListeningOnLaunch)
+            BeginInvoke(new Action(() => StartVoice()));
     }
 
     private void BuildUi()
@@ -69,7 +96,7 @@ public sealed class MainForm : Form
         var logo = new Label { Text = "N", ForeColor = Green, BackColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(24, 22, 52, 52) };
         var title = new Label { Text = "NOX", ForeColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = true, Left = 92, Top = 18 };
         var sub = new Label { Text = "Marsan Assistant", ForeColor = Color.FromArgb(205, 224, 213), Font = new Font("Segoe UI", 11), AutoSize = true, Left = 95, Top = 56 };
-        var badge = new Label { Text = "v0.1", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 900, Top = 38 };
+        var badge = new Label { Text = "v0.2", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 900, Top = 38 };
         header.Controls.AddRange(new Control[] { logo, title, sub, badge });
         Controls.Add(header);
 
@@ -86,30 +113,49 @@ public sealed class MainForm : Form
         var page = new TabPage("Assistente") { BackColor = Bg, Padding = new Padding(24) };
 
         var headline = new Label { Text = "Fale com o NOX", Font = new Font("Segoe UI", 22, FontStyle.Bold), ForeColor = Green, AutoSize = true, Left = 24, Top = 24 };
-        var hint = new Label { Text = "Primeira versão: digite comandos naturais. Ex.: “Nox, imprima a planilha da Santa Clara.”", ForeColor = Muted, AutoSize = true, Left = 27, Top = 66 };
+        var hint = new Label { Text = "Diga “NOX”, aguarde o bip e fale o comando. Você também pode digitar abaixo.", ForeColor = Muted, AutoSize = true, Left = 27, Top = 66 };
 
-        command.SetBounds(27, 110, 720, 38);
+        voiceToggle.Text = "🎤 Ativar voz";
+        voiceToggle.BackColor = Green2;
+        voiceToggle.ForeColor = Color.White;
+        voiceToggle.FlatStyle = FlatStyle.Flat;
+        voiceToggle.FlatAppearance.BorderSize = 0;
+        voiceToggle.SetBounds(27, 100, 150, 40);
+        voiceToggle.Click += (_, _) => ToggleVoice();
+
+        voiceStatus.Text = "Voz desativada";
+        voiceStatus.ForeColor = Muted;
+        voiceStatus.SetBounds(195, 110, 500, 26);
+
+        command.SetBounds(27, 160, 720, 38);
         command.Font = new Font("Segoe UI", 12);
         command.PlaceholderText = "Digite um comando para o NOX...";
-        command.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await ExecuteCommandAsync(); } };
+        command.KeyDown += async (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                await ExecuteCommandTextAsync(command.Text.Trim(), false);
+            }
+        };
 
-        var run = new Button { Text = "Executar", BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Left = 760, Top = 108, Width = 140, Height = 40 };
+        var run = new Button { Text = "Executar", BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Left = 760, Top = 158, Width = 140, Height = 40 };
         run.FlatAppearance.BorderSize = 0;
-        run.Click += async (_, _) => await ExecuteCommandAsync();
+        run.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
 
         noxStatus.Text = "Pronto";
         noxStatus.ForeColor = Green2;
         noxStatus.Font = new Font("Segoe UI", 10, FontStyle.Bold);
-        noxStatus.SetBounds(27, 165, 800, 26);
+        noxStatus.SetBounds(27, 215, 800, 26);
 
         output.Multiline = true;
         output.ReadOnly = true;
         output.ScrollBars = ScrollBars.Vertical;
         output.BackColor = Color.White;
         output.BorderStyle = BorderStyle.FixedSingle;
-        output.SetBounds(27, 205, 873, 300);
+        output.SetBounds(27, 250, 873, 255);
 
-        page.Controls.AddRange(new Control[] { headline, hint, command, run, noxStatus, output });
+        page.Controls.AddRange(new Control[] { headline, hint, voiceToggle, voiceStatus, command, run, noxStatus, output });
         return page;
     }
 
@@ -162,58 +208,97 @@ public sealed class MainForm : Form
         var title = new Label { Text = "Configurações do NOX", Font = new Font("Segoe UI", 20, FontStyle.Bold), ForeColor = Green, AutoSize = true, Left = 24, Top = 24 };
 
         page.Controls.Add(title);
-        AddLabeled(page, "Token do Print Agent", agentToken, 28, 92, true);
-        AddLabeled(page, "Chave da API Marsan Consulta", consultaKey, 28, 165, true);
+        AddLabeled(page, "Token do Print Agent", agentToken, 28, 82, true);
+        AddLabeled(page, "Chave da API Marsan Consulta", consultaKey, 28, 150, true);
 
-        var pollLabel = new Label { Text = "Intervalo de consulta (segundos)", Left = 28, Top = 245, Width = 240 };
-        poll.SetBounds(28, 270, 120, 30);
+        var pollLabel = new Label { Text = "Intervalo de consulta (segundos)", Left = 28, Top = 225, Width = 240 };
+        poll.SetBounds(28, 250, 120, 30);
         poll.Minimum = 3; poll.Maximum = 300;
 
         autoStart.Text = "Iniciar NOX com o Windows";
-        autoStart.SetBounds(28, 330, 280, 28);
+        autoStart.SetBounds(28, 305, 280, 28);
 
-        var save = new Button { Text = "Salvar configurações", Left = 28, Top = 390, Width = 200, Height = 42, BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        autoListen.Text = "Ativar escuta por “NOX” ao iniciar";
+        autoListen.SetBounds(28, 340, 320, 28);
+
+        voiceResponses.Text = "Responder por voz";
+        voiceResponses.SetBounds(28, 375, 280, 28);
+
+        var save = new Button { Text = "Salvar configurações", Left = 28, Top = 425, Width = 200, Height = 42, BackColor = Green2, ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         save.FlatAppearance.BorderSize = 0;
         save.Click += (_, _) => { SaveUi(); MessageBox.Show("Configurações salvas.", "NOX"); };
 
         var note = new Label
         {
-            Text = "O NOX usa a mesma infraestrutura de impressão remota do Marsan Consulta.\nA chave da API fica armazenada apenas neste computador, em ProgramData.",
-            ForeColor = Muted, AutoSize = true, Left = 28, Top = 460
+            Text = "A palavra de ativação e o reconhecimento de voz desta versão usam o mecanismo de voz instalado no Windows.\nPara melhor resultado, instale o pacote de fala Português (Brasil) nas Configurações do Windows.",
+            ForeColor = Muted, AutoSize = true, Left = 28, Top = 490
         };
 
-        page.Controls.AddRange(new Control[] { pollLabel, poll, autoStart, save, note });
+        page.Controls.AddRange(new Control[] { pollLabel, poll, autoStart, autoListen, voiceResponses, save, note });
         return page;
     }
 
     private static void AddLabeled(Control parent, string labelText, TextBox box, int x, int y, bool password)
     {
         var label = new Label { Text = labelText, Left = x, Top = y, Width = 320 };
-        box.SetBounds(x, y + 26, 620, 30);
+        box.SetBounds(x, y + 24, 620, 30);
         box.UseSystemPasswordChar = password;
         parent.Controls.Add(label);
         parent.Controls.Add(box);
     }
 
-    private async Task ExecuteCommandAsync()
+    private void ToggleVoice()
     {
-        var text = command.Text.Trim();
+        if (voice.IsRunning) StopVoice();
+        else StartVoice();
+    }
+
+    private void StartVoice()
+    {
+        voice.Start();
+        if (voice.IsRunning)
+        {
+            voiceToggle.Text = "⏹ Desativar voz";
+            voiceStatus.Text = "Aguardando “NOX”...";
+            Log("VOZ", string.IsNullOrWhiteSpace(voice.RecognizerName)
+                ? "Escuta ativada."
+                : $"Escuta ativada com {voice.RecognizerName}.");
+        }
+    }
+
+    private void StopVoice()
+    {
+        voice.Stop();
+        voiceToggle.Text = "🎤 Ativar voz";
+        voiceStatus.Text = "Voz desativada";
+    }
+
+    private async Task ExecuteCommandTextAsync(string text, bool fromVoice)
+    {
+        text = text.Trim();
         if (text.Length == 0) return;
+
         SaveUi();
         noxStatus.Text = "Pensando...";
-        Log("VOCÊ", text);
+        Log(fromVoice ? "VOCÊ 🎤" : "VOCÊ", text);
 
         try
         {
             var result = await nox.ExecuteAsync(text, cfg, CancellationToken.None);
             noxStatus.Text = result.Success ? "Concluído" : "Não entendi";
             Log("NOX", result.Message);
+
+            if (cfg.VoiceResponses && fromVoice)
+                voice.Speak(result.Message);
+
             if (result.Success) command.Clear();
         }
         catch (Exception ex)
         {
             noxStatus.Text = "Erro";
             Log("ERRO", ex.Message);
+            if (cfg.VoiceResponses && fromVoice)
+                voice.Speak("Ocorreu um erro ao executar o comando.");
         }
     }
 
@@ -237,6 +322,8 @@ public sealed class MainForm : Form
         agentToken.Text = cfg.AgentToken;
         consultaKey.Text = cfg.ConsultaApiKey;
         autoStart.Checked = cfg.AutoStart;
+        autoListen.Checked = cfg.StartListeningOnLaunch;
+        voiceResponses.Checked = cfg.VoiceResponses;
         savePdf.Checked = cfg.SavePdfInsteadOfPrint;
         poll.Value = Math.Clamp(cfg.PollSeconds, 3, 300);
     }
@@ -246,6 +333,8 @@ public sealed class MainForm : Form
         cfg.AgentToken = agentToken.Text.Trim();
         cfg.ConsultaApiKey = consultaKey.Text.Trim();
         cfg.AutoStart = autoStart.Checked;
+        cfg.StartListeningOnLaunch = autoListen.Checked;
+        cfg.VoiceResponses = voiceResponses.Checked;
         cfg.SavePdfInsteadOfPrint = savePdf.Checked;
         cfg.PollSeconds = (int)poll.Value;
         cfg.PrinterName = printers.SelectedItem?.ToString() ?? cfg.PrinterName;
@@ -259,10 +348,14 @@ public sealed class MainForm : Form
         {
             e.Cancel = true;
             Hide();
-            tray.ShowBalloonTip(1500, "NOX", "Continuo ativo na bandeja do Windows.", ToolTipIcon.Info);
+            tray.ShowBalloonTip(1500, "NOX", voice.IsRunning
+                ? "Continuo ativo e aguardando a palavra NOX."
+                : "Continuo ativo na bandeja do Windows.", ToolTipIcon.Info);
             return;
         }
+
         tray.Visible = false;
+        voice.Dispose();
         printService.Dispose();
     }
 }
