@@ -1,4 +1,4 @@
-name: Build NOX Marsan Assistant
+name: Build MARSAN Assistant
 on:
   workflow_dispatch:
   push:
@@ -14,9 +14,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Publish NOX Windows x64
+      - name: Run voice interpretation tests
+        run: dotnet run --project nox/NoxMarsanAssistant.Tests/NoxMarsanAssistant.Tests.csproj -c Release
+      - name: Publish MARSAN Windows x64
         run: dotnet publish nox/NoxMarsanAssistant/NoxMarsanAssistant.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
       - uses: actions/upload-artifact@v4
         with:
-          name: NOX-Marsan-Assistant-Windows-x64
+          name: MARSAN-Assistant-Windows-x64
           path: nox/NoxMarsanAssistant/bin/Release/net8.0-windows/win-x64/publish/NoxMarsanAssistant.exe
