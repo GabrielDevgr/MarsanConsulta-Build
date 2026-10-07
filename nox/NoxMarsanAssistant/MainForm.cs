@@ -46,48 +46,69 @@ public sealed class MainForm : Form
         LoadConfigToUi();
         RefreshPrinters();
 
-        printService.StatusChanged += s => BeginInvoke(new Action(() =>
+        printService.StatusChanged += s => Ui(() =>
         {
             agentStatus.Text = s;
             Log("PRINT", s);
-        }));
+        });
 
-        voice.StatusChanged += s => BeginInvoke(new Action(() =>
+        voice.StatusChanged += s => Ui(() =>
         {
             voiceStatus.Text = s;
             noxStatus.Text = s;
-        }));
+        });
 
-        voice.ErrorOccurred += s => BeginInvoke(new Action(() =>
+        voice.ErrorOccurred += s => Ui(() =>
         {
             voiceStatus.Text = "Erro de voz";
             Log("VOZ", s);
-        }));
+        });
 
-        voice.CommandRecognized += text => BeginInvoke(new Action(async () =>
+        voice.CommandRecognized += text => Ui(async () =>
         {
             command.Text = text;
             await ExecuteCommandTextAsync(text, true);
-        }));
+        });
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Abrir NOX", null, (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); });
-        menu.Items.Add("Ativar/desativar voz", null, (_, _) => ToggleVoice());
-        menu.Items.Add("Executar comando", null, (_, _) => { Show(); command.Focus(); });
+        menu.Items.Add("Abrir NOX", null, (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); }));
+        menu.Items.Add("Ativar/desativar voz", null, (_, _) => Ui(ToggleVoice));
+        menu.Items.Add("Executar comando", null, (_, _) => Ui(() => { Show(); command.Focus(); }));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Sair", null, (_, _) => { reallyExit = true; Close(); });
+        menu.Items.Add("Sair", null, (_, _) => Ui(() => { reallyExit = true; Close(); }));
 
         tray.Text = "NOX Marsan Assistant";
         tray.Icon = SystemIcons.Application;
         tray.Visible = true;
         tray.ContextMenuStrip = menu;
-        tray.DoubleClick += (_, _) => { Show(); WindowState = FormWindowState.Normal; Activate(); };
+        tray.DoubleClick += (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); });
 
-        if (!string.IsNullOrWhiteSpace(cfg.AgentToken))
-            printService.Start(() => cfg);
+        Shown += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(cfg.AgentToken))
+                printService.Start(() => cfg);
 
-        if (cfg.StartListeningOnLaunch)
-            BeginInvoke(new Action(() => StartVoice()));
+            if (cfg.StartListeningOnLaunch)
+                StartVoice();
+        };
+    }
+
+    private void Ui(Action action)
+    {
+        if (IsDisposed || Disposing) return;
+
+        if (!IsHandleCreated)
+        {
+            try { CreateControl(); } catch { return; }
+        }
+
+        try
+        {
+            if (InvokeRequired) BeginInvoke(action);
+            else action();
+        }
+        catch (InvalidOperationException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private void BuildUi()
@@ -96,7 +117,7 @@ public sealed class MainForm : Form
         var logo = new Label { Text = "N", ForeColor = Green, BackColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter, Bounds = new Rectangle(24, 22, 52, 52) };
         var title = new Label { Text = "NOX", ForeColor = Color.White, Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = true, Left = 92, Top = 18 };
         var sub = new Label { Text = "Marsan Assistant", ForeColor = Color.FromArgb(205, 224, 213), Font = new Font("Segoe UI", 11), AutoSize = true, Left = 95, Top = 56 };
-        var badge = new Label { Text = "v0.2", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 900, Top = 38 };
+        var badge = new Label { Text = "v0.2.2", ForeColor = Gold, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Anchor = AnchorStyles.Top | AnchorStyles.Right, Left = 888, Top = 38 };
         header.Controls.AddRange(new Control[] { logo, title, sub, badge });
         Controls.Add(header);
 
