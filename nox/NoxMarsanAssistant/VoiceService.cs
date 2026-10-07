@@ -66,7 +66,7 @@ public sealed class VoiceService : IDisposable
     public event Action<string>? DiagnosticLog;
 
     public bool IsRunning => running;
-    public string RecognizerName { get; private set; } = "Vosk wake + Whisper.cpp local";
+    public string RecognizerName { get; private set; } = "Vosk Grok + Groq Whisper Large V3";
 
     public VoiceService()
     {
