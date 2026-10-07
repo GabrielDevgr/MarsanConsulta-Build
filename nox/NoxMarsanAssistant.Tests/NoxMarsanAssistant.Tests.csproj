@@ -1,13 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../NoxMarsanAssistant/NoxMarsanAssistant.csproj" />
+    <Compile Include="../NoxMarsanAssistant/VoiceRecognitionModels.cs" Link="VoiceRecognitionModels.cs" />
+    <Compile Include="../NoxMarsanAssistant/VoiceTextNormalizer.cs" Link="VoiceTextNormalizer.cs" />
+    <Compile Include="../NoxMarsanAssistant/VoiceSimilarity.cs" Link="VoiceSimilarity.cs" />
+    <Compile Include="../NoxMarsanAssistant/MarsanVocabulary.cs" Link="MarsanVocabulary.cs" />
+    <Compile Include="../NoxMarsanAssistant/MarsanVoiceInterpreter.cs" Link="MarsanVoiceInterpreter.cs" />
   </ItemGroup>
 </Project>
