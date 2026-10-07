@@ -70,9 +70,10 @@ public sealed class NoxCommandService
             cfg.VoiceRecognition ?? new VoiceRecognitionSettings(),
             wakeRequired: false);
 
-        // Fase atual do assistente: após a ativação, todo comando é de impressão.
-        // Portanto, não exigimos que o STT reconheça o verbo. O problema passa a
-        // ser somente identificar com segurança qual documento/planilha foi citado.
+        // MODO PRINT-ONLY:
+        // após "Grok", a única ação disponível é imprimir.
+        // Portanto, o verbo não participa da decisão. O que importa é qual
+        // entidade ficou claramente acima das demais.
         if (interpretation.Entity is not null &&
             interpretation.Entity.Printable &&
             interpretation.EntityScore is not null)
@@ -81,13 +82,19 @@ public sealed class NoxCommandService
             var secondScore = interpretation.SecondEntityScore?.FinalScore ?? 0.0;
             var margin = bestScore - secondScore;
 
-            // Nome muito claro: imprime direto.
-            if (bestScore >= 0.86 && margin >= 0.12)
+            // Regra A: nome razoável + grande separação do segundo candidato.
+            // Ex.: Gelenski 71% contra 30% => imprime.
+            var dominantEntity = bestScore >= 0.66 && margin >= 0.20;
+
+            // Regra B: nome muito forte, mesmo com margem um pouco menor.
+            var strongEntity = bestScore >= 0.78 && margin >= 0.12;
+
+            if (dominantEntity || strongEntity)
             {
                 var diagnostics = interpretation.Diagnostics.ToList();
                 diagnostics.Add(
-                    $"[PRINT-ONLY MODE] Entidade identificada com {bestScore:P0} " +
-                    $"e margem {margin:P0}; PRINT assumido automaticamente.");
+                    $"[PRINT-ONLY MODE] {interpretation.Entity.DisplayName} aceito diretamente " +
+                    $"({bestScore:P0}; segundo={secondScore:P0}; margem={margin:P0}).");
 
                 return await ExecutePrintAsync(
                     interpretation.Entity,
@@ -98,98 +105,30 @@ public sealed class NoxCommandService
                     diagnostics);
             }
 
-            // Nome razoavelmente claro: pede confirmação em vez de arriscar.
-            if (bestScore >= 0.68 && margin >= 0.10)
+            // Não existe confirmação por voz nesta fase. Se não houver uma
+            // entidade dominante, é mais seguro não imprimir do que pedir uma
+            // confirmação que o usuário nem precisa usar.
+            if (bestScore >= 0.50)
             {
-                pending = new PendingVoiceAction(
-                    MarsanIntent.Print,
-                    interpretation.Entity.Id,
-                    interpretation.Entity.DisplayName,
-                    ExtractCopies(command),
-                    DateTime.Now);
-
                 var diagnostics = interpretation.Diagnostics.ToList();
                 diagnostics.Add(
-                    $"[PRINT-ONLY MODE] Entidade provável {interpretation.Entity.DisplayName} " +
-                    $"({bestScore:P0}, margem {margin:P0}); confirmação solicitada.");
+                    $"[PRINT-ONLY MODE] Rejeitado por ambiguidade " +
+                    $"({bestScore:P0}; segundo={secondScore:P0}; margem={margin:P0}).");
 
                 return new(
                     false,
-                    $"Você quis dizer imprimir {interpretation.Entity.DisplayName}?",
-                    true,
+                    "Não consegui identificar a planilha com segurança.",
+                    false,
                     diagnostics);
             }
         }
 
-        // Recuperação contextual para comandos de voz:
-        // após o usuário ativar o MS, o Whisper às vezes perde apenas o verbo
-        // ("imprima") e preserva perfeitamente o documento ("gelenski").
-        // Nesse caso, se a entidade estiver muito clara e for imprimível,
-        // assumimos PRINT em vez de descartar uma identificação excelente.
-        var recoveredPrint = false;
-        if (interpretation.Intent == MarsanIntent.Unknown &&
-            interpretation.Entity is not null &&
-            interpretation.Entity.Printable &&
-            interpretation.EntityScore is not null &&
-            interpretation.EntityScore.FinalScore >= 0.88 &&
-            (interpretation.SecondEntityScore is null ||
-             interpretation.EntityScore.FinalScore - interpretation.SecondEntityScore.FinalScore >= 0.20))
-        {
-            recoveredPrint = true;
-        }
-
-        // Também aceitamos uma impressão quando o verbo foi reconhecido e a
-        // entidade ficou moderadamente deformada, desde que exista uma margem
-        // grande para o segundo candidato. Isso resolve casos como
-        // "m s em prima e geleski" sem liberar nomes ambíguos.
-        var confidentPrint = interpretation.Intent == MarsanIntent.Print &&
-                             interpretation.IntentScore >= 0.80 &&
-                             interpretation.Entity is not null &&
-                             interpretation.Entity.Printable &&
-                             interpretation.EntityScore is not null &&
-                             interpretation.EntityScore.FinalScore >= 0.72 &&
-                             (interpretation.SecondEntityScore is null ||
-                              interpretation.EntityScore.FinalScore - interpretation.SecondEntityScore.FinalScore >= 0.20);
-
-        if ((interpretation.ShouldExecute || recoveredPrint || confidentPrint) &&
-            interpretation.Entity is not null)
-        {
-            var diagnostics = interpretation.Diagnostics.ToList();
-            if (recoveredPrint)
-                diagnostics.Add("[RECOVERY] Verbo ausente; PRINT assumido por entidade >= 88% e margem >= 20%.");
-            else if (confidentPrint && !interpretation.ShouldExecute)
-                diagnostics.Add("[RECOVERY] PRINT liberado por entidade >= 72% com margem >= 20%.");
-
-            if (interpretation.Intent == MarsanIntent.Print || recoveredPrint || confidentPrint)
-                return await ExecutePrintAsync(interpretation.Entity, ExtractCopies(command), data.RootElement, cfg, ct, diagnostics);
-
-            if (interpretation.Intent == MarsanIntent.Open)
-                return new(false,
-                    $"Entendi que você quer abrir {interpretation.Entity.DisplayName}, mas a abertura visual ainda não está ligada a uma ação nesta versão.",
-                    false,
-                    diagnostics);
-        }
-
-        if (interpretation.RequiresConfirmation && interpretation.Entity is not null)
-        {
-            pending = new PendingVoiceAction(
-                interpretation.Intent,
-                interpretation.Entity.Id,
-                interpretation.Entity.DisplayName,
-                ExtractCopies(command),
-                DateTime.Now);
-
-            return new(false,
-                interpretation.ConfirmationPrompt ?? $"Você quis dizer {interpretation.Entity.DisplayName}?",
-                true,
-                interpretation.Diagnostics);
-        }
-
-        var message = interpretation.Intent == MarsanIntent.Unknown
-            ? "Não consegui identificar a ação do comando."
-            : "Não consegui identificar o documento com segurança.";
-
-        return new(false, message, false, interpretation.Diagnostics);
+        // Nesta fase não pedimos confirmação: ou a planilha está clara, ou rejeitamos.
+        return new(
+            false,
+            "Não consegui identificar a planilha com segurança.",
+            false,
+            interpretation.Diagnostics);
     }
 
     private async Task<NoxCommandResult> ExecutePendingAsync(PendingVoiceAction action, NoxConfig cfg, CancellationToken ct)
