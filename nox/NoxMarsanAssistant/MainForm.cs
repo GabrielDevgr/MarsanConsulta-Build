@@ -84,6 +84,7 @@ public sealed class MainForm : Form
         });
 
         voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava MARSAN: {s}"));
+        voice.DiagnosticLog += s => Ui(() => Log("VOICE", s));
 
         voice.CommandRecognized += text => Ui(async () =>
         {
@@ -683,7 +684,7 @@ public sealed class MainForm : Form
     {
         voiceToggle.Enabled = false;
         voiceToggle.Text = "Preparando...";
-        await voice.StartAsync();
+        await voice.StartAsync(cfg.VoiceRecognition);
         voiceToggle.Enabled = true;
 
         if (voice.IsRunning)
@@ -720,6 +721,10 @@ public sealed class MainForm : Form
         {
             var result = await nox.ExecuteAsync(text, cfg, CancellationToken.None);
             assistantStatus.Text = result.Success ? "Comando concluído" : "Não entendi o comando";
+            if (result.Diagnostics is not null)
+                foreach (var line in result.Diagnostics)
+                    Log("ANÁLISE", line);
+
             Log("MARSAN", result.Message);
 
             if (cfg.VoiceResponses && fromVoice)
