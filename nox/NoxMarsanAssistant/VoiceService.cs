@@ -9,6 +9,17 @@ namespace NoxMarsanAssistant;
 
 public sealed class VoiceService : IDisposable
 {
+    private enum AssistantState
+    {
+        Idle,
+        WakeArmed,
+        Guard,
+        Listening,
+        Processing,
+        Speaking,
+        Cooldown,
+        Training
+    }
     private const string ModelFolderName = "vosk-model-small-pt-0.3";
     private const string ModelZipUrl = "https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip";
 
@@ -20,7 +31,6 @@ public sealed class VoiceService : IDisposable
     private WaveInEvent? waveIn;
     private Model? model;
     private VoskRecognizer? recognizer;
-    private VoskRecognizer? wakeFallbackRecognizer;
     private SpeechSynthesizer? synthesizer;
 
     private bool running;
@@ -38,6 +48,13 @@ public sealed class VoiceService : IDisposable
     private DateTime lastCommandVoiceAt = DateTime.MinValue;
     private bool whisperBusy;
     private DateTime suppressRecognitionUntil = DateTime.MinValue;
+    private AssistantState state = AssistantState.Idle;
+    private DateTime stateSince = DateTime.MinValue;
+    private DateTime cooldownUntil = DateTime.MinValue;
+    private DateTime guardUntil = DateTime.MinValue;
+    private double ambientRms = 180.0;
+    private double commandVoiceThreshold = 650.0;
+    private int consecutiveWakeHits;
 
     public event Action<string>? StatusChanged;
     public event Action<string>? CommandRecognized;
@@ -126,6 +143,8 @@ public sealed class VoiceService : IDisposable
             running = true;
             commandMode = false;
             wakeSequenceArmed = false;
+            consecutiveWakeHits = 0;
+            SetState(AssistantState.Idle);
             ResetRecognizer(wakeOnly: true);
 
             waveIn.StartRecording();
@@ -152,6 +171,8 @@ public sealed class VoiceService : IDisposable
         running = false;
         commandMode = false;
         wakeSequenceArmed = false;
+        consecutiveWakeHits = 0;
+        SetState(AssistantState.Idle);
 
         try { waveIn?.StopRecording(); } catch { }
         try
@@ -182,6 +203,7 @@ public sealed class VoiceService : IDisposable
             trainingMode = true;
             commandMode = false;
             trainingStartedAt = DateTime.Now;
+            SetState(AssistantState.Training);
             ResetRecognizer(wakeOnly: false);
             PlayActivationTone();
             StatusChanged?.Invoke("Treinamento • fale o nome agora...");
@@ -193,6 +215,7 @@ public sealed class VoiceService : IDisposable
         lock (sync)
         {
             trainingMode = false;
+            SetState(AssistantState.Idle);
             ResetRecognizer(wakeOnly: true);
             StatusChanged?.Invoke("Treinamento cancelado.");
         }
@@ -211,8 +234,11 @@ public sealed class VoiceService : IDisposable
             // nova wake word. A janela é proporcional ao tamanho da frase.
             var estimatedSeconds = Math.Clamp(text.Length / 13.0 + 0.8, 1.5, 12.0);
             suppressRecognitionUntil = DateTime.Now.AddSeconds(estimatedSeconds);
+            cooldownUntil = suppressRecognitionUntil.AddMilliseconds(700);
+            SetState(AssistantState.Speaking);
 
             synthesizer.SpeakAsyncCancelAll();
+            synthesizer.SpeakCompleted += OnSpeakCompleted;
             synthesizer.SpeakAsync(text);
         }
         catch { }
@@ -283,17 +309,42 @@ public sealed class VoiceService : IDisposable
     {
         if (!running || e.BytesRecorded <= 0) return;
 
-        if (DateTime.Now < suppressRecognitionUntil)
+        var now = DateTime.Now;
+
+        if (state == AssistantState.Speaking && now >= suppressRecognitionUntil)
+            SetState(AssistantState.Cooldown);
+
+        if (state == AssistantState.Cooldown && now >= cooldownUntil)
+            SetState(AssistantState.Idle);
+
+        if (state is AssistantState.Speaking or AssistantState.Cooldown or AssistantState.Processing)
             return;
 
         lock (sync)
         {
             try
             {
+                var rms = CalculatePcmRms(e.Buffer, e.BytesRecorded);
+
+                if (state == AssistantState.Idle)
+                    ambientRms = ambientRms * 0.97 + Math.Min(rms, 2500.0) * 0.03;
+
+                if (state == AssistantState.Guard)
+                {
+                    if (now < guardUntil)
+                        return;
+
+                    SetState(AssistantState.Listening);
+                    commandMode = true;
+                    commandStartedAt = now;
+                    commandSpeechStarted = false;
+                    lastCommandVoiceAt = DateTime.MinValue;
+                }
+
                 if (whisperBusy)
                     return;
 
-                if (commandMode && !trainingMode)
+                if (state == AssistantState.Listening && commandMode && !trainingMode)
                 {
                     CaptureWhisperCommand(e.Buffer, e.BytesRecorded);
                     return;
@@ -303,33 +354,6 @@ public sealed class VoiceService : IDisposable
 
                 var isFinal = recognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
 
-                // Enquanto aguardamos a wake word, alimenta também um reconhecedor
-                // livre. Isso evita depender de "Marsan" existir no vocabulário
-                // da gramática restrita do Vosk.
-                bool fallbackFinal = false;
-                string fallbackText = "";
-                string fallbackPartial = "";
-                if (!commandMode && !trainingMode && wakeFallbackRecognizer is not null)
-                {
-                    fallbackFinal = wakeFallbackRecognizer.AcceptWaveform(e.Buffer, e.BytesRecorded);
-                    if (fallbackFinal)
-                        fallbackText = ReadText(wakeFallbackRecognizer.Result(), "text");
-                    else
-                        fallbackPartial = ReadText(wakeFallbackRecognizer.PartialResult(), "partial");
-                }
-
-                // Primeiro processamos o recognizer livre de fallback. Ele pode
-                // conter a frase completa "MS + comando", enquanto a gramática
-                // restrita normalmente contém apenas a wake word.
-                if (!commandMode && !trainingMode)
-                {
-                    if (fallbackFinal && !string.IsNullOrWhiteSpace(fallbackText))
-                        HandleWakeFallback(fallbackText, isPartial: false);
-                    else if (!string.IsNullOrWhiteSpace(fallbackPartial))
-                        HandleWakeFallback(fallbackPartial, isPartial: true);
-                }
-
-                // Se o fallback não mudou de modo, processa o recognizer principal.
                 if (!trainingMode)
                 {
                     if (isFinal)
@@ -349,6 +373,7 @@ public sealed class VoiceService : IDisposable
                 if (trainingMode && DateTime.Now - trainingStartedAt > TimeSpan.FromSeconds(8))
                 {
                     trainingMode = false;
+                    SetState(AssistantState.Idle);
                     ResetRecognizer(wakeOnly: true);
                     StatusChanged?.Invoke("Treinamento • tempo esgotado.");
                 }
@@ -384,50 +409,8 @@ public sealed class VoiceService : IDisposable
 
         if (!commandMode)
         {
-            var wakeScore = MarsanVocabulary.WakeScore(normalized);
-
-            // Nunca troca de recognizer durante resultado parcial. Fazer isso no
-            // meio da fala corta o áudio seguinte e foi a causa do "MS reconhece,
-            // mas não ouve o comando".
-            if (isPartial)
-            {
-                if (ShouldReportWaitingTranscript(text, true))
-                    HeardWhileWaiting?.Invoke(text);
-                return;
-            }
-
-            if (wakeScore >= recognitionSettings.WakeExecuteThreshold)
-            {
-                var inlineCommand = ExtractCommandAfterWake(normalized);
-                if (!string.IsNullOrWhiteSpace(inlineCommand) && LooksLikeDirectCommand(inlineCommand))
-                {
-                    PlayActivationTone();
-                    DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
-                    DiagnosticLog?.Invoke($"[MS ATIVADO] Comando na mesma frase: \"{inlineCommand}\"");
-                    StatusChanged?.Invoke($"MS ativado • ouvi: {inlineCommand}");
-                    CommandRecognized?.Invoke(inlineCommand);
-                    ResetRecognizer(wakeOnly: true);
-                    return;
-                }
-
-                PlayActivationTone();
-                DiagnosticLog?.Invoke($"[WAKE WORD] Texto: \"{text}\" | MS | Score: {wakeScore:P0}");
-                DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
-                StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-                BeginWhisperCommandCapture();
-            }
-            else
-            {
-                if (ShouldReportWaitingTranscript(text, false))
-                    HeardWhileWaiting?.Invoke(text);
-
-                if (LooksLikeDirectCommand(normalized))
-                {
-                    StatusChanged?.Invoke($"Comando direto detectado: {text}");
-                    CommandRecognized?.Invoke(text.Trim());
-                }
-            }
-
+            if (ShouldReportWaitingTranscript(text, isPartial))
+                HeardWhileWaiting?.Invoke(text);
             return;
         }
 
@@ -451,15 +434,21 @@ public sealed class VoiceService : IDisposable
         commandSpeechStarted = false;
         lastCommandVoiceAt = DateTime.MinValue;
 
-        commandPcm?.Dispose();
-        commandPcm = new MemoryStream(capacity: 32000 * 8);
+        commandVoiceThreshold = Math.Clamp(ambientRms * 2.8, 550.0, 2200.0);
 
-        // Durante o comando o Vosk sai completamente do caminho. Apenas o PCM
-        // cru é coletado para o Whisper.
+        commandPcm?.Dispose();
+        commandPcm = new MemoryStream(capacity: 32000 * 4);
+
         recognizer?.Dispose();
         recognizer = null;
-        wakeFallbackRecognizer?.Dispose();
-        wakeFallbackRecognizer = null;
+
+        // Assistentes modernos deixam um pequeno "guard time" depois do bip
+        // para não gravar o próprio tom de ativação.
+        guardUntil = DateTime.Now.AddMilliseconds(250);
+        SetState(AssistantState.Guard);
+
+        DiagnosticLog?.Invoke(
+            $"[VAD] ruído={ambientRms:F0} • limiar voz={commandVoiceThreshold:F0} • guard=250ms");
     }
 
     private void CaptureWhisperCommand(byte[] buffer, int bytesRecorded)
@@ -470,9 +459,7 @@ public sealed class VoiceService : IDisposable
         var rms = CalculatePcmRms(buffer, bytesRecorded);
         var now = DateTime.Now;
 
-        // Limiar propositalmente baixo: o Whisper lida melhor com ruído do que
-        // perder o começo de uma palavra.
-        if (rms >= 300)
+        if (rms >= commandVoiceThreshold)
         {
             commandSpeechStarted = true;
             lastCommandVoiceAt = now;
@@ -482,13 +469,13 @@ public sealed class VoiceService : IDisposable
         var silenceAfterSpeech =
             commandSpeechStarted &&
             lastCommandVoiceAt != DateTime.MinValue &&
-            now - lastCommandVoiceAt >= TimeSpan.FromMilliseconds(550);
+            now - lastCommandVoiceAt >= TimeSpan.FromMilliseconds(600);
 
-        var noSpeechTimeout = !commandSpeechStarted && elapsed >= TimeSpan.FromSeconds(1.8);
+        var noSpeechTimeout = !commandSpeechStarted && elapsed >= TimeSpan.FromSeconds(1.6);
 
-        if ((silenceAfterSpeech && elapsed >= TimeSpan.FromMilliseconds(650)) ||
+        if ((silenceAfterSpeech && elapsed >= TimeSpan.FromMilliseconds(700)) ||
             noSpeechTimeout ||
-            elapsed >= TimeSpan.FromSeconds(3.5))
+            elapsed >= TimeSpan.FromSeconds(3.2))
         {
             FinishWhisperCommandCapture();
         }
@@ -502,6 +489,7 @@ public sealed class VoiceService : IDisposable
         commandPcm = null;
         commandMode = false;
         wakeSequenceArmed = false;
+        consecutiveWakeHits = 0;
 
         ResetRecognizer(wakeOnly: true);
 
@@ -513,6 +501,7 @@ public sealed class VoiceService : IDisposable
         }
 
         whisperBusy = true;
+        SetState(AssistantState.Processing);
         StatusChanged?.Invoke("Whisper • entendendo o comando...");
 
         _ = Task.Run(async () =>
@@ -539,6 +528,8 @@ public sealed class VoiceService : IDisposable
             finally
             {
                 whisperBusy = false;
+                cooldownUntil = DateTime.Now.AddMilliseconds(900);
+                SetState(AssistantState.Cooldown);
                 StatusChanged?.Invoke("Aguardando “MS” (ême ésse)...");
             }
         });
@@ -565,26 +556,18 @@ public sealed class VoiceService : IDisposable
     {
         recognizer?.Dispose();
         recognizer = null;
-        wakeFallbackRecognizer?.Dispose();
-        wakeFallbackRecognizer = null;
 
         if (model is null) return;
 
         if (wakeOnly)
         {
-            // Em modo de espera priorizamos a wake word MS ("ême ésse").
-            // Mantemos o reconhecedor livre em paralelo para captar variações
-            // que a gramática restrita não produzir.
-            var wakeWords = MarsanVocabulary.GetWakeAliases()
-                .Concat(new[] { "eme esse", "eme se", "m s", "ms" })
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            var wakeWords = new[]
+            {
+                "eme", "em", "esse", "ese", "se", "s",
+                "eme esse", "eme se", "eme s", "m s", "ms"
+            };
             var grammar = JsonSerializer.Serialize(wakeWords);
-
             recognizer = new VoskRecognizer(model, 16000.0f, grammar);
-
-            // Reconhecedor livre em paralelo apenas durante a espera.
-            wakeFallbackRecognizer = new VoskRecognizer(model, 16000.0f);
         }
         else
         {
@@ -592,68 +575,87 @@ public sealed class VoiceService : IDisposable
         }
 
         recognizer.SetWords(true);
-        wakeFallbackRecognizer?.SetWords(true);
-    }
-
-    private void HandleWakeFallback(string text, bool isPartial)
-    {
-        var normalized = VoiceTextNormalizer.Normalize(text);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return;
-
-        if (!commandMode && TryHandleWakeSequence(normalized, isPartial))
-            return;
-
-        // O reconhecedor livre é somente diagnóstico.
-        // Ele nunca ativa o assistente, evitando falsos positivos por frases comuns.
-        if (ShouldReportWaitingTranscript(text, isPartial))
-            HeardWhileWaiting?.Invoke($"fallback: {text}");
     }
 
     private bool TryHandleWakeSequence(string normalized, bool isPartial)
     {
-        if (string.IsNullOrWhiteSpace(normalized))
+        if (state is AssistantState.Processing or AssistantState.Speaking or AssistantState.Cooldown or AssistantState.Listening or AssistantState.Guard)
             return false;
 
         var n = VoiceTextNormalizer.Normalize(normalized);
-        var tokens = n.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (string.IsNullOrWhiteSpace(n))
+            return false;
 
-        if (wakeSequenceArmed && DateTime.Now - wakeSequenceStartedAt > TimeSpan.FromMilliseconds(1200))
+        var now = DateTime.Now;
+
+        if (wakeSequenceArmed && now - wakeSequenceStartedAt > TimeSpan.FromMilliseconds(1200))
+        {
             wakeSequenceArmed = false;
+            consecutiveWakeHits = 0;
+            SetState(AssistantState.Idle);
+        }
 
-        bool HasEme() =>
-            tokens.Any(t => t is "eme" or "em") ||
-            n.Equals("m", StringComparison.Ordinal) ||
-            n.StartsWith("eme ", StringComparison.Ordinal);
+        // Forma completa em uma única hipótese do recognizer restrito.
+        var completeWake = n is "eme esse" or "eme se" or "eme s" or "m s" or "ms" or "emese";
+        if (completeWake)
+        {
+            consecutiveWakeHits++;
+            if (consecutiveWakeHits < 2 && isPartial)
+                return false;
 
-        bool HasEsse() =>
-            tokens.Any(t => t is "s" or "se" or "esse" or "ese") ||
-            n.Equals("eme se", StringComparison.Ordinal) ||
-            n.Equals("eme s", StringComparison.Ordinal) ||
-            n.Equals("eme esse", StringComparison.Ordinal) ||
-            n.Equals("emese", StringComparison.Ordinal);
+            ActivateWake(n);
+            return true;
+        }
 
-        if (!wakeSequenceArmed && HasEme())
+        // Primeira parte: somente formas exatas, nunca "contains".
+        if (!wakeSequenceArmed && n is "eme" or "em")
         {
             wakeSequenceArmed = true;
-            wakeSequenceStartedAt = DateTime.Now;
-            DiagnosticLog?.Invoke($"[WAKE SEQUENCE] Primeira parte detectada: \"{normalized}\"");
+            wakeSequenceStartedAt = now;
+            consecutiveWakeHits = 1;
+            SetState(AssistantState.WakeArmed);
+            DiagnosticLog?.Invoke($"[WAKE] primeira parte: \"{n}\"");
             return false;
         }
 
-        if (wakeSequenceArmed && HasEsse())
+        // Segunda parte precisa chegar logo após a primeira.
+        if (wakeSequenceArmed && n is "s" or "se" or "esse" or "ese")
         {
-            wakeSequenceArmed = false;
-
-            PlayActivationTone();
-            DiagnosticLog?.Invoke($"[WAKE SEQUENCE] MS confirmado por sequência: \"{normalized}\"");
-            DiagnosticLog?.Invoke("[MS ATIVADO] >>> MODO DE COMANDO INICIADO <<< • Whisper");
-            StatusChanged?.Invoke("MS ATIVADO • fale o comando agora...");
-            BeginWhisperCommandCapture(includeRecentAudio: false);
+            ActivateWake(n);
             return true;
         }
 
         return false;
+    }
+
+    private void ActivateWake(string heard)
+    {
+        wakeSequenceArmed = false;
+        consecutiveWakeHits = 0;
+
+        PlayActivationTone();
+        DiagnosticLog?.Invoke($"[WAKE] MS confirmado: \"{heard}\"");
+        DiagnosticLog?.Invoke("[MS ATIVADO] >>> LISTENING <<< • Whisper");
+        StatusChanged?.Invoke("MS ATIVADO • fale o nome...");
+        BeginWhisperCommandCapture();
+    }
+
+    private void SetState(AssistantState next)
+    {
+        if (state == next) return;
+        state = next;
+        stateSince = DateTime.Now;
+        DiagnosticLog?.Invoke($"[STATE] {next.ToString().ToUpperInvariant()}");
+    }
+
+    private void OnSpeakCompleted(object? sender, SpeakCompletedEventArgs e)
+    {
+        if (synthesizer is not null)
+            synthesizer.SpeakCompleted -= OnSpeakCompleted;
+
+        suppressRecognitionUntil = DateTime.Now;
+        cooldownUntil = DateTime.Now.AddMilliseconds(700);
+        SetState(AssistantState.Cooldown);
     }
 
     private static string ExtractCommandAfterWake(string value)
@@ -923,7 +925,6 @@ public sealed class VoiceService : IDisposable
     {
         Stop();
         try { recognizer?.Dispose(); } catch { }
-        try { wakeFallbackRecognizer?.Dispose(); } catch { }
         try { model?.Dispose(); } catch { }
         try { synthesizer?.Dispose(); } catch { }
         whisper.Dispose();
