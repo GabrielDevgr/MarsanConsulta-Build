@@ -84,7 +84,7 @@ public sealed class MainForm : Form
             Log("VOZ", s);
         });
 
-        voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava MS: {s}"));
+        voice.HeardWhileWaiting += s => Ui(() => Log("ESCUTA", $"Ouvi enquanto aguardava Grok: {s}"));
         voice.DiagnosticLog += s => Ui(() => Log("VOICE", s));
 
         voice.CommandRecognized += text => Ui(async () =>
@@ -188,7 +188,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 13, AutoSize = true, ForeColor = Color.FromArgb(139, 161, 150), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) },
-            new Label { Text = "v0.10.1", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
+            new Label { Text = "v0.11.0", Left = 2, Top = 37, AutoSize = true, ForeColor = Color.FromArgb(91, 118, 105), Font = new Font("Segoe UI", 8.5f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -698,8 +698,8 @@ public sealed class MainForm : Form
         if (voice.IsRunning)
         {
             voiceToggle.Text = "Desativar voz";
-            voiceStatus.Text = "Aguardando “MS” (ême ésse)...";
-            assistantStatus.Text = "Aguardando “MS” (ême ésse)...";
+            voiceStatus.Text = "Aguardando “Grok”...";
+            assistantStatus.Text = "Aguardando “Grok”...";
             Log("VOZ", $"Escuta ativada com {voice.RecognizerName}.");
         }
         else
@@ -790,7 +790,7 @@ public sealed class MainForm : Form
             e.Cancel = true;
             Hide();
             tray.ShowBalloonTip(1500, "MARSAN", voice.IsRunning
-                ? "Continuo ativo e aguardando a palavra MS."
+                ? "Continuo ativo e aguardando a palavra Grok."
                 : "Continuo ativo na bandeja do Windows.", ToolTipIcon.Info);
             return;
         }
