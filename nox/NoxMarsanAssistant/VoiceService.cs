@@ -105,7 +105,7 @@ public sealed class VoiceService : IDisposable
             ResetRecognizer(wakeOnly: true);
 
             waveIn.StartRecording();
-            StatusChanged?.Invoke("Aguardando “NOX”...");
+            StatusChanged?.Invoke("Aguardando “MARSAN”...");
         }
         catch (Exception ex)
         {
@@ -237,7 +237,7 @@ public sealed class VoiceService : IDisposable
                 {
                     commandMode = false;
                     ResetRecognizer(wakeOnly: true);
-                    StatusChanged?.Invoke("Tempo esgotado. Diga “NOX” novamente.");
+                    StatusChanged?.Invoke("Tempo esgotado. Diga “MARSAN” novamente.");
                 }
             }
             catch (Exception ex)
@@ -259,7 +259,7 @@ public sealed class VoiceService : IDisposable
                 commandStartedAt = DateTime.Now;
 
                 SystemSounds.Asterisk.Play();
-                StatusChanged?.Invoke("NOX ativado • ouvindo comando...");
+                StatusChanged?.Invoke("MARSAN ativado • ouvindo comando...");
 
                 ResetRecognizer(wakeOnly: false);
             }
@@ -338,13 +338,12 @@ public sealed class VoiceService : IDisposable
 
         var tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        // O modelo PT-BR costuma transcrever "NOX" como "nos", "noz" ou "nosso".
-        // Aceitamos essas formas apenas em falas curtas para reduzir falsos positivos.
-        if (tokens.Length <= 2 &&
-            tokens.Any(t => t is "nox" or "nocs" or "nocks" or "noques" or "nos" or "noz" or "nós" or "nois" or "noxx"))
+        // "Marsan" costuma soar como "marçam" e pode ser transcrito de formas parecidas.
+        if (tokens.Length <= 3 &&
+            tokens.Any(t => t is "marsan" or "marsam" or "marcan" or "marcam" or "marsa" or "marssan"))
             return true;
 
-        return tokens.Any(t => t is "nox" or "nocs" or "nocks" or "noques");
+        return tokens.Any(t => t is "marsan" or "marsam" or "marcan" or "marcam");
     }
 
     private static string Normalize(string value)
