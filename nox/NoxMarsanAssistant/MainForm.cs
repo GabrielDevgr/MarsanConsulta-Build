@@ -83,7 +83,14 @@ public sealed class MainForm : Form
         MinimizeBox = true;
         SizeGripStyle = SizeGripStyle.Hide;
         StartPosition = FormStartPosition.CenterScreen;
-        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; } catch { Icon = SystemIcons.Application; }
+        try
+        {
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+        }
+        catch
+        {
+            Icon = SystemIcons.Application;
+        }
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
         FormClosing += OnClosing;
@@ -148,7 +155,7 @@ public sealed class MainForm : Form
         menu.Items.Add("Sair", null, (_, _) => Ui(() => { reallyExit = true; Close(); }));
 
         tray.Text = "MARSAN Assistant";
-        tray.Icon = SystemIcons.Application;
+        tray.Icon = Icon ?? SystemIcons.Application;
         tray.Visible = true;
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); });
@@ -228,7 +235,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 16, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
-            new Label { Text = "v0.12.2", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
+            new Label { Text = "v0.12.3", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
             new Label { Text = "●  Assistente ativo", Left = 104, Top = 49, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
         });
 
