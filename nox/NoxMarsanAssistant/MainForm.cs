@@ -235,7 +235,7 @@ public sealed class MainForm : Form
         footer.Controls.AddRange(new Control[]
         {
             new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 16, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
-            new Label { Text = "v0.12.4", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
+            new Label { Text = "v0.12.5", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
             new Label { Text = "●  Assistente ativo", Left = 104, Top = 49, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
         });
 
