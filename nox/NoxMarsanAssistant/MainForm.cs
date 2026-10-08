@@ -209,7 +209,7 @@ public sealed class MainForm : Form
         var nav = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 350,
+            Height = 280,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             BackColor = Sidebar,
@@ -218,16 +218,14 @@ public sealed class MainForm : Form
 
         nav.Controls.Add(CreateNavButton("assistant", "▥   Assistente"));
         nav.Controls.Add(CreateNavButton("print", "▣   Impressão"));
-        nav.Controls.Add(CreateNavButton("training", "◉   Treinamento"));
         nav.Controls.Add(CreateNavButton("settings", "⚙   Configurações"));
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 138, BackColor = Sidebar };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 86, BackColor = Sidebar };
         footer.Controls.AddRange(new Control[]
         {
-            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 20, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
-            new Label { Text = "Soluções em madeira para\num futuro sustentável.", Left = 2, Top = 47, Width = 210, Height = 44, ForeColor = Color.FromArgb(161, 188, 175), Font = new Font("Segoe UI", 8.5f) },
-            new Label { Text = "v0.12.0", Left = 2, Top = 105, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
-            new Label { Text = "●  Assistente ativo", Left = 104, Top = 104, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
+            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 16, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
+            new Label { Text = "v0.12.1", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
+            new Label { Text = "●  Assistente ativo", Left = 104, Top = 49, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -318,7 +316,6 @@ public sealed class MainForm : Form
         Control body = page switch
         {
             "print" => BuildPrintPage(),
-            "training" => BuildTrainingPage(),
             "settings" => BuildSettingsPage(),
             _ => BuildAssistantPage()
         };
@@ -331,7 +328,6 @@ public sealed class MainForm : Form
             title.Text = page switch
             {
                 "print" => "Central de impressão",
-                "training" => "Treinamento de voz",
                 "settings" => "Configurações",
                 _ => "Assistente"
             };
@@ -339,7 +335,6 @@ public sealed class MainForm : Form
             subtitle.Text = page switch
             {
                 "print" => "Fila, impressora e processamento de documentos.",
-                "training" => "Pronúncias e vocabulário local do assistente.",
                 "settings" => "Integrações, APIs e comportamento do sistema.",
                 _ => "Comandos por voz e automações da Marsan Madeiras."
             };
@@ -429,19 +424,20 @@ public sealed class MainForm : Form
         heroMeta.Font = new Font("Segoe UI", 9.5f);
 
         heroBadge.Text = "AGUARDANDO";
-        heroBadge.SetBounds(790, 66, 175, 48);
+        heroBadge.SetBounds(830, 70, 135, 36);
         heroBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         heroBadge.TextAlign = ContentAlignment.MiddleCenter;
         heroBadge.ForeColor = Color.White;
         heroBadge.BackColor = Green;
-        heroBadge.Font = new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold);
+        heroBadge.Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold);
 
         hero.Controls.AddRange(new Control[] { printerCircle, heroTitle, heroSubtitle, heroMeta, heroBadge, voiceToggle });
 
         voiceToggle.Text = voice.IsRunning ? "Desativar voz" : "Ativar voz";
-        voiceToggle.SetBounds(790, 124, 175, 36);
+        voiceToggle.SetBounds(830, 116, 135, 30);
         voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         StylePrimaryButton(voiceToggle);
+        voiceToggle.Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold);
         voiceToggle.Click -= VoiceToggleClick;
         voiceToggle.Click += VoiceToggleClick;
 
@@ -484,24 +480,56 @@ public sealed class MainForm : Form
             Left = 0,
             Top = 408,
             Width = 1000,
-            Height = 112,
+            Height = 136,
             BackColor = Card,
             Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
+
         cmdCard.Controls.Add(new Label
         {
             Text = "Comando de voz ou manual",
             Left = 24,
-            Top = 16,
+            Top = 14,
             AutoSize = true,
             ForeColor = TextColor,
             Font = new Font("Segoe UI Semibold", 10.8f, FontStyle.Bold)
         });
 
-        command.SetBounds(24, 50, 760, 40);
+        cmdCard.Controls.Add(new Label
+        {
+            Text = "Dicas: fale “Grok” e depois “Serragem Gelenski”, “Toras Aza”, “Santa Clara”...",
+            Left = 24,
+            Top = 39,
+            Width = 820,
+            Height = 20,
+            ForeColor = Muted,
+            Font = new Font("Segoe UI", 8.7f)
+        });
+
+        var mic = new Button
+        {
+            Text = "🎤",
+            Left = 24,
+            Top = 72,
+            Width = 42,
+            Height = 36,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = SoftGreen,
+            ForeColor = GreenDark,
+            Font = new Font("Segoe UI Emoji", 11),
+            Cursor = Cursors.Hand
+        };
+        mic.FlatAppearance.BorderColor = Border;
+        mic.Click += (_, _) =>
+        {
+            if (!voice.IsRunning) _ = StartVoiceAsync();
+            command.Focus();
+        };
+
+        command.SetBounds(74, 72, 650, 36);
         command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        command.Font = new Font("Segoe UI", 11);
+        command.Font = new Font("Segoe UI", 10.5f);
         command.PlaceholderText = "Ex.: Serragem Gelenski ou Toras Aza";
         command.KeyDown -= CommandKeyDown;
         command.KeyDown += CommandKeyDown;
@@ -509,22 +537,23 @@ public sealed class MainForm : Form
         var run = new Button
         {
             Text = "▶  Executar comando",
-            Left = 802,
-            Top = 48,
-            Width = 174,
-            Height = 42,
+            Left = 742,
+            Top = 71,
+            Width = 234,
+            Height = 38,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         StylePrimaryButton(run);
         run.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
-        cmdCard.Controls.AddRange(new Control[] { command, run });
+
+        cmdCard.Controls.AddRange(new Control[] { mic, command, run });
 
         var logCard = new RoundedPanel
         {
             Left = 0,
-            Top = 538,
+            Top = 562,
             Width = 1000,
-            Height = 260,
+            Height = 236,
             BackColor = Card,
             Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
@@ -563,7 +592,7 @@ public sealed class MainForm : Form
         clear.FlatAppearance.BorderColor = Border;
         clear.Click += (_, _) => output.Clear();
 
-        output.SetBounds(24, 70, 952, 166);
+        output.SetBounds(24, 70, 952, 142);
         output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         output.Multiline = true;
         output.ReadOnly = true;
