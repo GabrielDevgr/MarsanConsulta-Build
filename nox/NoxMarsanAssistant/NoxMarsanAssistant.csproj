@@ -12,11 +12,15 @@
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishTrimmed>false</PublishTrimmed>
-    <Version>0.12.1</Version>
+    <Version>0.12.2</Version>
     <Company>Marsan Madeiras</Company>
     <Product>MARSAN Assistant</Product>
-    <Description>Assistente de voz offline e central de impressão da Marsan Madeiras</Description>
+    <Description>Assistente de voz e central de impressão da Marsan Madeiras</Description>
+    <ApplicationIcon>marsan.ico</ApplicationIcon>
   </PropertyGroup>
+  <Target Name="GenerateMarsanIcon" BeforeTargets="PrepareForBuild">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$b=[IO.File]::ReadAllText('$(MSBuildProjectDirectory)\marsan-icon.b64'); [IO.File]::WriteAllBytes('$(MSBuildProjectDirectory)\marsan.ico',[Convert]::FromBase64String($b))&quot;" />
+  </Target>
   <ItemGroup>
     <PackageReference Include="System.Speech" Version="8.0.0" />
     <PackageReference Include="Vosk" Version="0.3.38" />
