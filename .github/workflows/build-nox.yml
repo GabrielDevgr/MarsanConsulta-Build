@@ -14,6 +14,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Prepare MARSAN application icon
+        shell: pwsh
+        run: |
+          $b64 = Get-Content "nox/NoxMarsanAssistant/marsan-icon.b64" -Raw
+          [IO.File]::WriteAllBytes("nox/NoxMarsanAssistant/marsan.ico", [Convert]::FromBase64String($b64.Trim()))
+          Write-Host "marsan.ico generated:" (Get-Item "nox/NoxMarsanAssistant/marsan.ico").Length "bytes"
       - name: Run voice interpretation tests
         run: dotnet run --project nox/NoxMarsanAssistant.Tests/NoxMarsanAssistant.Tests.csproj -c Release
       - name: Publish MARSAN Windows x64
