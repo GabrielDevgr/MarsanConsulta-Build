@@ -12,13 +12,15 @@
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishTrimmed>false</PublishTrimmed>
-    <Version>0.12.2</Version>
+    <Version>0.12.3</Version>
     <Company>Marsan Madeiras</Company>
     <Product>MARSAN Assistant</Product>
     <Description>Assistente de voz e central de impressão da Marsan Madeiras</Description>
     <ApplicationIcon>marsan.ico</ApplicationIcon>
+    <Win32Icon>marsan.ico</Win32Icon>
+    <UseAppHost>true</UseAppHost>
   </PropertyGroup>
-  <Target Name="GenerateMarsanIcon" BeforeTargets="PrepareForBuild">
+  <Target Name="GenerateMarsanIcon" BeforeTargets="CoreCompile;PrepareForBuild;CreateAppHost">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$b=[IO.File]::ReadAllText('$(MSBuildProjectDirectory)\marsan-icon.b64'); [IO.File]::WriteAllBytes('$(MSBuildProjectDirectory)\marsan.ico',[Convert]::FromBase64String($b))&quot;" />
   </Target>
   <ItemGroup>
