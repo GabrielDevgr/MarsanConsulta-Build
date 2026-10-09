@@ -5,7 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>NoxMarsanAssistant</AssemblyName>
+    <AssemblyName>MarsanGrokAssistant</AssemblyName>
     <RootNamespace>NoxMarsanAssistant</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
@@ -14,7 +14,7 @@
     <PublishTrimmed>false</PublishTrimmed>
     <Version>0.12.5</Version>
     <Company>Marsan Madeiras</Company>
-    <Product>MARSAN Assistant</Product>
+    <Product>MARSAN GROK ASSISTANT</Product>
     <Description>Assistente de voz e central de impressão da Marsan Madeiras</Description>
     <ApplicationIcon>marsan.ico</ApplicationIcon>
     <Win32Icon>marsan.ico</Win32Icon>

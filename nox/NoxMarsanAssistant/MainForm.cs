@@ -79,7 +79,7 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "MARSAN Assistant";
+        Text = "MARSAN GROK ASSISTANT";
         ClientSize = new Size(1320, 850);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -153,12 +153,12 @@ public sealed class MainForm : Form
         });
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Abrir MARSAN", null, (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); }));
+        menu.Items.Add("Abrir MARSAN GROK ASSISTANT", null, (_, _) => Ui(() => { Show(); WindowState = FormWindowState.Normal; Activate(); }));
         menu.Items.Add("Ativar/desativar voz", null, (_, _) => Ui(ToggleVoice));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sair", null, (_, _) => Ui(() => { reallyExit = true; Close(); }));
 
-        tray.Text = "MARSAN Assistant";
+        tray.Text = "MARSAN GROK ASSISTANT";
         tray.Icon = Icon ?? SystemIcons.Application;
         tray.Visible = true;
         tray.ContextMenuStrip = menu;
@@ -217,7 +217,7 @@ public sealed class MainForm : Form
         brand.Controls.AddRange(new Control[]
         {
             logo,
-            new Label { Text = "MARSAN", Left = 22, Top = 84, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 21, FontStyle.Bold) },
+            new Label { Text = "MARSAN GROK", Left = 22, Top = 84, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 21, FontStyle.Bold) },
             new Label { Text = "A S S I S T A N T", Left = 24, Top = 119, AutoSize = true, ForeColor = Color.FromArgb(156, 193, 174), Font = new Font("Segoe UI", 8.7f, FontStyle.Bold) }
         });
 
@@ -1055,7 +1055,7 @@ public sealed class MainForm : Form
         save.Click += (_, _) =>
         {
             SaveUi();
-            MessageBox.Show("Configurações salvas.", "MARSAN Assistant");
+            MessageBox.Show("Configurações salvas.", "MARSAN GROK ASSISTANT");
         };
 
         root.Controls.AddRange(new Control[] { printApi, consultaApi, groqApi, behavior, save });

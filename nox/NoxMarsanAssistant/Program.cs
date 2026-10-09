@@ -18,7 +18,7 @@ internal static class Program
             using var mutex = new Mutex(true, "NoxMarsanAssistant_SingleInstance", out var isNew);
             if (!isNew)
             {
-                MessageBox.Show("O NOX Marsan Assistant já está em execução.", "NOX");
+                MessageBox.Show("O MARSAN GROK ASSISTANT já está em execução.", "MARSAN GROK ASSISTANT");
                 return;
             }
 
@@ -28,10 +28,10 @@ internal static class Program
         {
             LogFatal(ex);
             MessageBox.Show(
-                "O NOX encontrou um erro ao iniciar.\n\n" +
+                "O MARSAN GROK ASSISTANT encontrou um erro ao iniciar.\n\n" +
                 ex.Message +
-                "\n\nUm log foi salvo em C:\\ProgramData\\NOX Marsan Assistant\\crash.log",
-                "NOX Marsan Assistant",
+                "\n\nUm log foi salvo em C:\\ProgramData\\MARSAN GROK ASSISTANT\\crash.log",
+                "MARSAN GROK ASSISTANT",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }
@@ -43,7 +43,7 @@ internal static class Program
         {
             var dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "NOX Marsan Assistant");
+                "MARSAN GROK ASSISTANT");
             Directory.CreateDirectory(dir);
             File.AppendAllText(
                 Path.Combine(dir, "crash.log"),
