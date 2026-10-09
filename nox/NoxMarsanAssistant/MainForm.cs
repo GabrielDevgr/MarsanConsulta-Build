@@ -405,9 +405,9 @@ public sealed class MainForm : Form
         var printerCircle = new RoundedPanel
         {
             Left = 28,
-            Top = 43,
-            Width = 86,
-            Height = 86,
+            Top = 37,
+            Width = 70,
+            Height = 70,
             BackColor = Green,
             Radius = 43
         };
@@ -534,9 +534,9 @@ public sealed class MainForm : Form
         {
             Text = "🎤",
             Left = 24,
-            Top = 72,
+            Top = 65,
             Width = 42,
-            Height = 36,
+            Height = 32,
             FlatStyle = FlatStyle.Flat,
             BackColor = SoftGreen,
             ForeColor = GreenDark,
@@ -561,9 +561,9 @@ public sealed class MainForm : Form
         {
             Text = "▶  Executar comando",
             Left = 742,
-            Top = 72,
-            Width = 234,
-            Height = 34,
+            Top = 65,
+            Width = 185,
+            Height = 32,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         StylePrimaryButton(run);
@@ -675,7 +675,7 @@ public sealed class MainForm : Form
     private RoundedPanel CreateMetricCard(string title, string icon, Color back, int x, int y, int w, int h)
     {
         var p = new RoundedPanel { Left = x, Top = y, Width = w, Height = h, BackColor = back, Radius = 18 };
-        var iconBox = new RoundedPanel { Left = 18, Top = 25, Width = 48, Height = 48, BackColor = Color.FromArgb(220, Green), Radius = 24 };
+        var iconBox = new RoundedPanel { Left = 12, Top = 23, Width = 46, Height = 46, BackColor = Color.FromArgb(220, Green), Radius = 24 };
         iconBox.Controls.Add(new Label
         {
             Text = icon,
@@ -688,9 +688,9 @@ public sealed class MainForm : Form
         p.Controls.Add(new Label
         {
             Text = title,
-            Left = 80,
-            Top = 14,
-            Width = 220,
+            Left = 72,
+            Top = 12,
+            Width = 175,
             Height = 23,
             ForeColor = TextColor,
             Font = new Font("Segoe UI", 9.2f)
