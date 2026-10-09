@@ -244,7 +244,7 @@ public sealed class NoxCommandService
             _ => "#f1f5f9"
         };
         var sb = new StringBuilder();
-        sb.Append(""" 
+        sb.Append("""
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><style>
 @page{size:A4 landscape;margin:9mm}
 *{box-sizing:border-box}
