@@ -80,7 +80,7 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "MARSAN GROK ASSISTANT";
-        ClientSize = new Size(1320, 850);
+        ClientSize = new Size(1120, 720);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         MinimizeBox = true;
@@ -294,7 +294,7 @@ public sealed class MainForm : Form
 
         contentHost.Dock = DockStyle.Fill;
         contentHost.BackColor = Bg;
-        contentHost.Padding = new Padding(26, 22, 26, 22);
+        contentHost.Padding = new Padding(22, 16, 22, 16);
 
         Controls.Add(contentHost);
         Controls.Add(topbar);
@@ -365,7 +365,7 @@ public sealed class MainForm : Form
 
     private Control BuildAssistantPage()
     {
-        var root = new Panel { BackColor = Bg, AutoScroll = true };
+        var root = new Panel { BackColor = Bg, AutoScroll = true, AutoScrollMinSize = new Size(780, 575) };
 
         var statusStrip = new Panel
         {
@@ -388,9 +388,9 @@ public sealed class MainForm : Form
         var hero = new RoundedPanel
         {
             Left = 0,
-            Top = 60,
+            Top = 51,
             Width = 1000,
-            Height = 164,
+            Height = 142,
             BackColor = Hero,
             Radius = 22,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -431,23 +431,23 @@ public sealed class MainForm : Form
         });
 
         heroTitle.Text = "Aguardando comando";
-        heroTitle.SetBounds(138, 39, 650, 42);
+        heroTitle.SetBounds(116, 34, 465, 40);
         heroTitle.ForeColor = Color.White;
         heroTitle.Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold);
         heroTitle.AutoEllipsis = true;
 
         heroSubtitle.Text = "Pronto para receber comandos de voz ou manuais.";
-        heroSubtitle.SetBounds(140, 82, 610, 27);
+        heroSubtitle.SetBounds(118, 76, 465, 25);
         heroSubtitle.ForeColor = Color.FromArgb(227, 242, 235);
         heroSubtitle.Font = new Font("Segoe UI Semibold", 12.2f);
 
         heroMeta.Text = "Diga “Grok” e o nome da planilha ou utilize o campo abaixo.";
-        heroMeta.SetBounds(140, 112, 640, 24);
+        heroMeta.SetBounds(118, 105, 465, 23);
         heroMeta.ForeColor = Color.FromArgb(173, 207, 191);
         heroMeta.Font = new Font("Segoe UI", 9.5f);
 
         heroBadge.Text = "AGUARDANDO";
-        heroBadge.SetBounds(830, 54, 135, 34);
+        heroBadge.SetBounds(830, 35, 135, 30);
         heroBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         heroBadge.TextAlign = ContentAlignment.MiddleCenter;
         heroBadge.ForeColor = Color.White;
@@ -457,14 +457,14 @@ public sealed class MainForm : Form
         hero.Controls.AddRange(new Control[] { printerCircle, heroTitle, heroSubtitle, heroMeta, heroBadge, voiceToggle });
 
         voiceToggle.Text = voice.IsRunning ? "Desativar voz" : "Ativar voz";
-        voiceToggle.SetBounds(830, 99, 135, 30);
+        voiceToggle.SetBounds(830, 76, 135, 30);
         voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         StylePrimaryButton(voiceToggle);
         voiceToggle.Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold);
         voiceToggle.Click -= VoiceToggleClick;
         voiceToggle.Click += VoiceToggleClick;
 
-        var lastCard = CreateMetricCard("Último comando entendido", "▤", SoftGreen, 0, 240, 322, 102);
+        var lastCard = CreateMetricCard("Último comando entendido", "▤", SoftGreen, 0, 209, 322, 92);
         lastCommandValue.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Nenhum comando" : lastTarget;
         lastCommandValue.SetBounds(80, 40, 220, 26);
         lastCommandValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
@@ -476,7 +476,7 @@ public sealed class MainForm : Form
         lastCommandMeta.Font = new Font("Segoe UI", 8.8f);
         lastCard.Controls.AddRange(new Control[] { lastCommandValue, lastCommandMeta });
 
-        var queueCard = CreateMetricCard("Fila de impressão", "▣", SoftBlue, 339, 240, 322, 102);
+        var queueCard = CreateMetricCard("Fila de impressão", "▣", SoftBlue, 339, 209, 322, 92);
         queueValue.Text = currentAgentStatus.Contains("pendente", StringComparison.OrdinalIgnoreCase) ? ExtractPendingText(currentAgentStatus) : "0 pendentes";
         queueValue.SetBounds(80, 40, 220, 26);
         queueValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
@@ -487,7 +487,7 @@ public sealed class MainForm : Form
         queueMeta.Font = new Font("Segoe UI", 8.8f);
         queueCard.Controls.AddRange(new Control[] { queueValue, queueMeta });
 
-        var nextCard = CreateMetricCard("Próxima ação", "◷", SoftAmber, 678, 240, 322, 102);
+        var nextCard = CreateMetricCard("Próxima ação", "◷", SoftAmber, 678, 209, 322, 92);
         nextActionValue.Text = "Aguardando comando";
         nextActionValue.SetBounds(80, 40, 220, 26);
         nextActionValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
@@ -501,9 +501,9 @@ public sealed class MainForm : Form
         var cmdCard = new RoundedPanel
         {
             Left = 0,
-            Top = 354,
+            Top = 315,
             Width = 1000,
-            Height = 120,
+            Height = 110,
             BackColor = Card,
             Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -550,7 +550,7 @@ public sealed class MainForm : Form
             command.Focus();
         };
 
-        command.SetBounds(74, 73, 650, 28);
+        command.SetBounds(74, 67, 650, 28);
         command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         command.Font = new Font("Segoe UI", 10.5f);
         command.PlaceholderText = "Ex.: Serragem Gelenski ou Toras Aza";
@@ -573,7 +573,7 @@ public sealed class MainForm : Form
 
         var recentCard = new RoundedPanel
         {
-            Left = 0, Top = 492, Width = 1000, Height = 105,
+            Left = 0, Top = 439, Width = 1000, Height = 126,
             BackColor = Card, Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
         };
@@ -593,66 +593,9 @@ public sealed class MainForm : Form
         recentCard.Controls.Add(recentPrintList);
         RefreshRecentPrints();
 
-        var logCard = new RoundedPanel
-        {
-            Left = 0,
-            Top = 615,
-            Width = 1000,
-            Height = 185,
-            BackColor = Card,
-            Radius = 18,
-            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
-        };
-        logCard.Controls.Add(new Label
-        {
-            Text = "Atividade recente",
-            Left = 24,
-            Top = 16,
-            AutoSize = true,
-            ForeColor = TextColor,
-            Font = new Font("Segoe UI Semibold", 11, FontStyle.Bold)
-        });
-        logCard.Controls.Add(new Label
-        {
-            Text = "Reconhecimento, ações e status do sistema em tempo real.",
-            Left = 24,
-            Top = 40,
-            AutoSize = true,
-            ForeColor = Muted,
-            Font = new Font("Segoe UI", 8.8f)
-        });
-
-        var clear = new Button
-        {
-            Text = "Limpar logs",
-            Left = 865,
-            Top = 18,
-            Width = 110,
-            Height = 32,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Color.White,
-            ForeColor = TextColor
-        };
-        clear.FlatAppearance.BorderColor = Border;
-        clear.Click += (_, _) => output.Clear();
-
-        output.SetBounds(24, 70, 952, 118);
-        output.WordWrap = false;
-        output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-        output.Multiline = true;
-        output.ReadOnly = true;
-        output.ScrollBars = ScrollBars.Vertical;
-        output.BorderStyle = BorderStyle.None;
-        output.BackColor = ConsoleBg;
-        output.ForeColor = Color.FromArgb(219, 238, 229);
-        output.Font = new Font("Consolas", 9.1f);
-
-        logCard.Controls.AddRange(new Control[] { clear, output });
-
         root.Controls.AddRange(new Control[]
         {
-            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, recentCard, logCard
+            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, recentCard
         });
 
         void LayoutDashboard()
@@ -663,16 +606,17 @@ public sealed class MainForm : Form
             cmdCard.Width = w;
             recentCard.Width = w;
             recentPrintList.Width = w - 48;
-            logCard.Width = w;
-            command.Width = Math.Max(200, w - 350);
-            run.Left = w - 258;
-            clear.Left = w - 135;
-            heroBadge.Left = w - 170;
-            voiceToggle.Left = w - 170;
-            output.Width = w - 48;
+            command.Width = Math.Max(200, w - 294);
+            run.Left = w - 209;
+            heroBadge.Left = w - 158;
+            voiceToggle.Left = w - 158;
 
             var gap = 16;
             var cardW = (w - gap * 2) / 3;
+            lastCommandValue.Width = lastCommandMeta.Width = Math.Max(110, cardW - 84);
+            queueValue.Width = queueMeta.Width = Math.Max(110, cardW - 84);
+            nextActionValue.Width = nextActionMeta.Width = Math.Max(110, cardW - 84);
+            heroTitle.Width = heroSubtitle.Width = heroMeta.Width = Math.Max(200, w - 312);
             lastCard.Width = cardW;
             queueCard.Left = cardW + gap;
             queueCard.Width = cardW;
