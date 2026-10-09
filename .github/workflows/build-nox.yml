@@ -2,7 +2,7 @@ name: Build MARSAN Assistant
 on:
   workflow_dispatch:
   push:
-    branches: [ nox-marsan-assistant ]
+    branches: [ nox-marsan-assistant, marsan-assistant-ui-refresh ]
     paths:
       - 'nox/**'
       - '.github/workflows/build-nox.yml'
