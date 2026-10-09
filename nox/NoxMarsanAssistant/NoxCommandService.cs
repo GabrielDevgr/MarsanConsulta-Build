@@ -54,7 +54,7 @@ public sealed class NoxCommandService
             return new(true, $"MARSAN ativo. Impressora: {(string.IsNullOrWhiteSpace(cfg.PrinterName) ? "não configurada" : cfg.PrinterName)}.");
 
         // Comandos de cheque têm prioridade sobre a busca de nomes de planilhas.
-        if (Regex.IsMatch(normalized, @"\\b(cheque|cheques|xeque|xeques)\\b"))
+        if (Regex.IsMatch(normalized, @"\b(cheque|cheques|xeque|xeques)\b"))
         {
             var status = ResolveCheckStatus(normalized);
             if (status is null)
