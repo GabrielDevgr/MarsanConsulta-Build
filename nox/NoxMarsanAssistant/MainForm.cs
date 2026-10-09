@@ -49,6 +49,9 @@ public sealed class MainForm : Form
     private readonly Label groqChipValue = new();
     private readonly Label printChipValue = new();
     private readonly Label wakeChipValue = new();
+    private readonly System.Windows.Forms.Timer idleTimer = new() { Interval = 3500 };
+    private readonly List<(string Target, DateTime When)> recentPrints = new();
+    private readonly FlowLayoutPanel recentPrintList = new();
     private string lastTarget = "";
     private DateTime? lastTargetAt;
 
@@ -94,6 +97,7 @@ public sealed class MainForm : Form
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Bg;
         FormClosing += OnClosing;
+        idleTimer.Tick += (_, _) => { idleTimer.Stop(); RestoreReadyState(); };
 
         BuildUi();
         LoadConfigToUi();
@@ -198,7 +202,7 @@ public sealed class MainForm : Form
             Top = 10,
             Width = 66,
             Height = 66,
-            BackColor = Green,
+            BackColor = Color.White,
             Radius = 20
         };
         logo.Controls.Add(new Label
@@ -206,7 +210,7 @@ public sealed class MainForm : Form
             Text = "M",
             Dock = DockStyle.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.White,
+            ForeColor = Color.Black,
             Font = new Font("Segoe UI", 28, FontStyle.Bold)
         });
 
@@ -418,18 +422,18 @@ public sealed class MainForm : Form
             Font = new Font("Segoe UI Semibold", 9.4f, FontStyle.Bold)
         });
 
-        heroTitle.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Pronto para receber comandos" : $"Imprimindo {lastTarget}";
+        heroTitle.Text = "Aguardando comando";
         heroTitle.SetBounds(138, 39, 650, 42);
         heroTitle.ForeColor = Color.White;
         heroTitle.Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold);
         heroTitle.AutoEllipsis = true;
 
-        heroSubtitle.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Diga “Grok” e fale o nome da planilha." : "Planilha identificada com sucesso";
+        heroSubtitle.Text = "Pronto para receber comandos de voz ou manuais.";
         heroSubtitle.SetBounds(140, 82, 610, 27);
         heroSubtitle.ForeColor = Color.FromArgb(227, 242, 235);
         heroSubtitle.Font = new Font("Segoe UI Semibold", 12.2f);
 
-        heroMeta.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Groq Whisper Large V3 • Print Agent integrado" : "Comando processado • aguardando impressão...";
+        heroMeta.Text = "Diga “Grok” e o nome da planilha ou utilize o campo abaixo.";
         heroMeta.SetBounds(140, 112, 640, 24);
         heroMeta.ForeColor = Color.FromArgb(173, 207, 191);
         heroMeta.Font = new Font("Segoe UI", 9.5f);
@@ -489,9 +493,9 @@ public sealed class MainForm : Form
         var cmdCard = new RoundedPanel
         {
             Left = 0,
-            Top = 358,
+            Top = 354,
             Width = 1000,
-            Height = 126,
+            Height = 120,
             BackColor = Card,
             Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
@@ -538,7 +542,7 @@ public sealed class MainForm : Form
             command.Focus();
         };
 
-        command.SetBounds(74, 72, 650, 36);
+        command.SetBounds(74, 73, 650, 28);
         command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         command.Font = new Font("Segoe UI", 10.5f);
         command.PlaceholderText = "Ex.: Serragem Gelenski ou Toras Aza";
@@ -549,9 +553,9 @@ public sealed class MainForm : Form
         {
             Text = "▶  Executar comando",
             Left = 742,
-            Top = 71,
+            Top = 72,
             Width = 234,
-            Height = 38,
+            Height = 34,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         StylePrimaryButton(run);
@@ -559,12 +563,34 @@ public sealed class MainForm : Form
 
         cmdCard.Controls.AddRange(new Control[] { mic, command, run });
 
+        var recentCard = new RoundedPanel
+        {
+            Left = 0, Top = 492, Width = 1000, Height = 105,
+            BackColor = Card, Radius = 18,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        recentCard.Controls.Add(new Label
+        {
+            Text = "▣  Últimas impressões",
+            Left = 24, Top = 12, Width = 300, Height = 23,
+            ForeColor = TextColor,
+            Font = new Font("Segoe UI Semibold", 10.8f, FontStyle.Bold)
+        });
+        recentPrintList.SetBounds(20, 44, 956, 53);
+        recentPrintList.FlowDirection = FlowDirection.LeftToRight;
+        recentPrintList.WrapContents = false;
+        recentPrintList.AutoScroll = true;
+        recentPrintList.BackColor = Card;
+        recentPrintList.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        recentCard.Controls.Add(recentPrintList);
+        RefreshRecentPrints();
+
         var logCard = new RoundedPanel
         {
             Left = 0,
-            Top = 500,
+            Top = 615,
             Width = 1000,
-            Height = 200,
+            Height = 185,
             BackColor = Card,
             Radius = 18,
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right
@@ -603,7 +629,8 @@ public sealed class MainForm : Form
         clear.FlatAppearance.BorderColor = Border;
         clear.Click += (_, _) => output.Clear();
 
-        output.SetBounds(24, 70, 952, 126);
+        output.SetBounds(24, 70, 952, 118);
+        output.WordWrap = false;
         output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         output.Multiline = true;
         output.ReadOnly = true;
@@ -617,7 +644,7 @@ public sealed class MainForm : Form
 
         root.Controls.AddRange(new Control[]
         {
-            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, logCard
+            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, recentCard, logCard
         });
 
         void LayoutDashboard()
@@ -626,7 +653,15 @@ public sealed class MainForm : Form
             statusStrip.Width = w;
             hero.Width = w;
             cmdCard.Width = w;
+            recentCard.Width = w;
+            recentPrintList.Width = w - 48;
             logCard.Width = w;
+            command.Width = Math.Max(200, w - 350);
+            run.Left = w - 258;
+            clear.Left = w - 135;
+            heroBadge.Left = w - 170;
+            voiceToggle.Left = w - 170;
+            output.Width = w - 48;
 
             var gap = 16;
             var cardW = (w - gap * 2) / 3;
@@ -1229,17 +1264,19 @@ public sealed class MainForm : Form
                     lastTargetAt = DateTime.Now;
                     lastCommandValue.Text = lastTarget;
                     lastCommandMeta.Text = $"Identificada via {(fromVoice ? "voz" : "comando manual")} • {DateTime.Now:HH:mm:ss}";
-                    SetHeroState($"Imprimindo {lastTarget}",
+                    SetHeroState($"Enviando {lastTarget}",
                         "Planilha identificada com sucesso",
                         "Comando processado • enviado ao Print Agent",
                         "ENVIADO");
                     nextActionValue.Text = "Aguardando impressão";
                     nextActionMeta.Text = lastTarget;
+                    QueueReturnToReady(4500);
                 }
                 else
                 {
                     SetHeroState("Comando executado", result.Message,
                         $"Concluído às {DateTime.Now:HH:mm:ss}", "CONCLUÍDO");
+                    QueueReturnToReady();
                 }
             }
             else
@@ -1259,6 +1296,7 @@ public sealed class MainForm : Form
             SetHeroState("Erro ao executar comando", "Ocorreu uma falha durante o processamento.",
                 ex.Message, "ERRO");
             Log("ERRO", ex.Message);
+            QueueReturnToReady(6500);
         }
     }
 
@@ -1271,6 +1309,7 @@ public sealed class MainForm : Form
 
     private void SetHeroState(string title, string subtitle, string meta, string badge)
     {
+        idleTimer.Stop();
         heroTitle.Text = title;
         heroSubtitle.Text = subtitle;
         heroMeta.Text = meta;
@@ -1328,6 +1367,8 @@ public sealed class MainForm : Form
             SetHeroState($"Impressão concluída", target,
                 $"Concluído às {DateTime.Now:HH:mm:ss}", "CONCLUÍDO");
             queueMeta.Text = $"Último: {target}";
+            RememberPrint(target);
+            QueueReturnToReady();
             nextActionValue.Text = "Aguardando comando";
             nextActionMeta.Text = "Pronto para a próxima solicitação";
         }
@@ -1336,12 +1377,63 @@ public sealed class MainForm : Form
             SetHeroState("PDF salvo com sucesso", lastTarget.Length > 0 ? lastTarget : "Documento processado",
                 status, "CONCLUÍDO");
             nextActionValue.Text = "Aguardando comando";
+            RememberPrint(lastTarget);
+            QueueReturnToReady();
         }
         else if (status.StartsWith("ERRO", StringComparison.OrdinalIgnoreCase))
         {
             SetHeroState("Falha na impressão", lastTarget.Length > 0 ? lastTarget : "Documento",
                 status, "ERRO");
+            QueueReturnToReady(6500);
         }
+    }
+
+    private void QueueReturnToReady(int delayMs = 3500)
+    {
+        idleTimer.Stop();
+        idleTimer.Interval = delayMs;
+        idleTimer.Start();
+    }
+
+    private void RestoreReadyState()
+    {
+        if (IsDisposed || Disposing) return;
+        SetHeroState("Aguardando comando",
+            "O assistente está pronto para receber comandos.",
+            "Diga “Grok” e o nome da planilha ou utilize o campo abaixo.", "AGUARDANDO");
+        nextActionValue.Text = "Aguardando comando";
+        nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
+    }
+
+    private void RememberPrint(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return;
+        recentPrints.RemoveAll(p => p.Target.Equals(target, StringComparison.OrdinalIgnoreCase));
+        recentPrints.Insert(0, (target, DateTime.Now));
+        if (recentPrints.Count > 3) recentPrints.RemoveRange(3, recentPrints.Count - 3);
+        RefreshRecentPrints();
+    }
+
+    private void RefreshRecentPrints()
+    {
+        if (recentPrintList.IsDisposed) return;
+        recentPrintList.SuspendLayout();
+        recentPrintList.Controls.Clear();
+        if (recentPrints.Count == 0)
+            recentPrintList.Controls.Add(new Label { Text = "Nenhuma impressão concluída nesta sessão.", AutoSize = true, ForeColor = Muted, Padding = new Padding(8, 8, 0, 0) });
+        foreach (var item in recentPrints)
+        {
+            var tile = new Panel { Width = 292, Height = 48, BackColor = SoftGreen, Margin = new Padding(2, 0, 10, 0) };
+            tile.Controls.Add(new Label { Text = item.Target, Left = 10, Top = 5, Width = 166, Height = 20, AutoEllipsis = true, Font = new Font("Segoe UI Semibold", 9.1f, FontStyle.Bold), ForeColor = TextColor });
+            tile.Controls.Add(new Label { Text = item.When.ToString("HH:mm:ss"), Left = 10, Top = 27, Width = 110, Height = 16, ForeColor = Muted, Font = new Font("Segoe UI", 8f) });
+            var retry = new Button { Text = "↻ Reimprimir", Left = 177, Top = 8, Width = 108, Height = 31, FlatStyle = FlatStyle.Flat, ForeColor = GreenDark, BackColor = Color.White, Cursor = Cursors.Hand };
+            retry.FlatAppearance.BorderColor = Border;
+            var target = item.Target;
+            retry.Click += async (_, _) => await ExecuteCommandTextAsync(target, false);
+            tile.Controls.Add(retry);
+            recentPrintList.Controls.Add(tile);
+        }
+        recentPrintList.ResumeLayout();
     }
 
     private static string ExtractPendingText(string status)
