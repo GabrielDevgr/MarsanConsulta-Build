@@ -503,6 +503,7 @@ public sealed class MainForm : Form
             recentTitle.SetBounds(18, 12, w - 36, 22);
             recentSub.SetBounds(18, 38, w - 36, 19);
             recentPrintList.SetBounds(16, 65, w - 32, Math.Max(24, recent.Height - 75));
+            if (recentPrints.Count > 0) RefreshRecentPrints();
         }
         root.Resize += (_, _) => Arrange();
         Arrange();
@@ -1251,10 +1252,11 @@ public sealed class MainForm : Form
             recentPrintList.Controls.Add(new Label { Text = "Nenhuma impressão concluída nesta sessão.", AutoSize = true, ForeColor = Muted, Padding = new Padding(8, 8, 0, 0) });
         foreach (var item in recentPrints)
         {
-            var tile = new Panel { Width = 292, Height = 48, BackColor = SoftGreen, Margin = new Padding(2, 0, 10, 0) };
-            tile.Controls.Add(new Label { Text = item.Target, Left = 10, Top = 5, Width = 166, Height = 20, AutoEllipsis = true, Font = new Font("Segoe UI Semibold", 9.1f, FontStyle.Bold), ForeColor = TextColor });
+            int tileWidth = Math.Max(180, (recentPrintList.ClientSize.Width - 26) / 3);
+            var tile = new Panel { Width = tileWidth, Height = 48, BackColor = SoftGreen, Margin = new Padding(2, 0, 6, 0) };
+            tile.Controls.Add(new Label { Text = item.Target, Left = 10, Top = 5, Width = Math.Max(65, tileWidth - 106), Height = 20, AutoEllipsis = true, Font = new Font("Segoe UI Semibold", 9.1f, FontStyle.Bold), ForeColor = TextColor });
             tile.Controls.Add(new Label { Text = item.When.ToString("HH:mm:ss"), Left = 10, Top = 27, Width = 110, Height = 16, ForeColor = Muted, Font = new Font("Segoe UI", 8f) });
-            var retry = new Button { Text = "↻ Reimprimir", Left = 177, Top = 8, Width = 108, Height = 31, FlatStyle = FlatStyle.Flat, ForeColor = GreenDark, BackColor = Color.White, Cursor = Cursors.Hand };
+            var retry = new Button { Text = "↻ Reimprimir", Left = tileWidth - 94, Top = 8, Width = 88, Height = 31, FlatStyle = FlatStyle.Flat, ForeColor = GreenDark, BackColor = Color.White, Cursor = Cursors.Hand };
             retry.FlatAppearance.BorderColor = Border;
             var target = item.Target;
             retry.Click += async (_, _) => await ExecuteCommandTextAsync(target, false);
