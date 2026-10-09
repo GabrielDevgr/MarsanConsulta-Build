@@ -363,273 +363,149 @@ public sealed class MainForm : Form
             };
     }
 
+
     private Control BuildAssistantPage()
     {
-        var root = new Panel { BackColor = Bg, AutoScroll = true, AutoScrollMinSize = new Size(780, 575) };
+        var root = new Panel { BackColor = Bg, AutoScroll = false, Dock = DockStyle.Fill };
 
-        var statusStrip = new Panel
-        {
-            Left = 0,
-            Top = 0,
-            Width = 1000,
-            Height = 54,
-            BackColor = Bg,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-
-        var chip1 = CreateStatusChip("🎙", "Groq STT", groqChipValue, 0);
-        var chip2 = CreateStatusChip("▣", "Print Agent", printChipValue, 178);
-        var chip3 = CreateStatusChip("◉", "Wake Word: Grok", wakeChipValue, 356);
+        var top = new Panel { BackColor = Bg };
+        var c1 = CreateStatusChip("●", "Groq STT", groqChipValue, 0);
+        var c2 = CreateStatusChip("▣", "Print Agent", printChipValue, 0);
+        var c3 = CreateStatusChip("◉", "Wake Word: Grok", wakeChipValue, 0);
+        top.Controls.AddRange(new Control[] { c1, c2, c3 });
         groqChipValue.Text = string.IsNullOrWhiteSpace(cfg.GroqApiKey) ? "Não configurado" : "Online";
         printChipValue.Text = currentAgentStatus.StartsWith("Conectado", StringComparison.OrdinalIgnoreCase) ? "Conectado" : currentAgentStatus;
         wakeChipValue.Text = voice.IsRunning ? "Ativo" : "Inativo";
-        statusStrip.Controls.AddRange(new Control[] { chip1, chip2, chip3 });
 
-        var hero = new RoundedPanel
-        {
-            Left = 0,
-            Top = 51,
-            Width = 1000,
-            Height = 142,
-            BackColor = Hero,
-            Radius = 22,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-        hero.Paint += (_, e) =>
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var brush = new LinearGradientBrush(hero.ClientRectangle, Hero, Hero2, 0f);
-            e.Graphics.FillRectangle(brush, hero.ClientRectangle);
-        };
-
-        var printerCircle = new RoundedPanel
-        {
-            Left = 28,
-            Top = 37,
-            Width = 70,
-            Height = 70,
-            BackColor = Green,
-            Radius = 43
-        };
-        printerCircle.Controls.Add(new Label
-        {
-            Text = "▣",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = Color.White,
-            Font = new Font("Segoe UI Symbol", 30, FontStyle.Bold)
-        });
-
-        hero.Controls.Add(new Label
-        {
-            Text = "●  ASSISTENTE ATIVO",
-            Left = 30,
-            Top = 17,
-            AutoSize = true,
-            ForeColor = Accent,
-            Font = new Font("Segoe UI Semibold", 9.4f, FontStyle.Bold)
-        });
-
+        var hero = new RoundedPanel { BackColor = Hero, Radius = 18 };
+        var visual = new Label { Text = "◉", ForeColor = Accent, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI Symbol", 32, FontStyle.Bold) };
+        var eyebrow = new Label { Text = "●  ASSISTENTE ATIVO", ForeColor = Accent, Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold) };
         heroTitle.Text = "Aguardando comando";
-        heroTitle.SetBounds(116, 34, 465, 40);
         heroTitle.ForeColor = Color.White;
-        heroTitle.Font = new Font("Segoe UI Semibold", 23, FontStyle.Bold);
+        heroTitle.Font = new Font("Segoe UI Semibold", 20, FontStyle.Bold);
         heroTitle.AutoEllipsis = true;
-
         heroSubtitle.Text = "Pronto para receber comandos de voz ou manuais.";
-        heroSubtitle.SetBounds(118, 76, 465, 25);
-        heroSubtitle.ForeColor = Color.FromArgb(227, 242, 235);
-        heroSubtitle.Font = new Font("Segoe UI Semibold", 12.2f);
-
-        heroMeta.Text = "Diga “Grok” e o nome da planilha ou utilize o campo abaixo.";
-        heroMeta.SetBounds(118, 105, 465, 23);
-        heroMeta.ForeColor = Color.FromArgb(173, 207, 191);
-        heroMeta.Font = new Font("Segoe UI", 9.5f);
-
+        heroSubtitle.ForeColor = Color.FromArgb(232, 244, 236);
+        heroSubtitle.Font = new Font("Segoe UI", 10f);
+        heroSubtitle.AutoEllipsis = true;
+        heroMeta.Text = "Diga “Grok” e depois o nome da planilha.";
+        heroMeta.ForeColor = Color.FromArgb(176, 218, 194);
+        heroMeta.Font = new Font("Segoe UI", 9f);
+        heroMeta.AutoEllipsis = true;
         heroBadge.Text = "AGUARDANDO";
-        heroBadge.SetBounds(830, 35, 135, 30);
-        heroBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        heroBadge.TextAlign = ContentAlignment.MiddleCenter;
-        heroBadge.ForeColor = Color.White;
         heroBadge.BackColor = Green;
-        heroBadge.Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold);
-
-        hero.Controls.AddRange(new Control[] { printerCircle, heroTitle, heroSubtitle, heroMeta, heroBadge, voiceToggle });
-
+        heroBadge.ForeColor = Color.White;
+        heroBadge.TextAlign = ContentAlignment.MiddleCenter;
+        heroBadge.Font = new Font("Segoe UI Semibold", 8f, FontStyle.Bold);
         voiceToggle.Text = voice.IsRunning ? "Desativar voz" : "Ativar voz";
-        voiceToggle.SetBounds(830, 76, 135, 30);
-        voiceToggle.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         StylePrimaryButton(voiceToggle);
-        voiceToggle.Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold);
+        voiceToggle.Font = new Font("Segoe UI Semibold", 8.4f, FontStyle.Bold);
         voiceToggle.Click -= VoiceToggleClick;
         voiceToggle.Click += VoiceToggleClick;
+        hero.Controls.AddRange(new Control[] { visual, eyebrow, heroTitle, heroSubtitle, heroMeta, heroBadge, voiceToggle });
 
-        var lastCard = CreateMetricCard("Último comando entendido", "▤", SoftGreen, 0, 209, 322, 92);
+        RoundedPanel Metric(string heading, Color background, Label value, Label detail)
+        {
+            var card = new RoundedPanel { BackColor = background, Radius = 15 };
+            var label = new Label { Text = heading, Left = 17, Top = 12, Height = 19, ForeColor = Muted, Font = new Font("Segoe UI", 9f) };
+            value.Left = 17; value.Top = 36; value.Height = 25;
+            value.ForeColor = TextColor; value.AutoEllipsis = true;
+            value.Font = new Font("Segoe UI Semibold", 11f, FontStyle.Bold);
+            detail.Left = 17; detail.Top = 65; detail.Height = 18;
+            detail.ForeColor = Muted; detail.AutoEllipsis = true;
+            detail.Font = new Font("Segoe UI", 8f);
+            card.Controls.AddRange(new Control[] { label, value, detail });
+            card.Resize += (_, _) => { label.Width = value.Width = detail.Width = Math.Max(70, card.ClientSize.Width - 34); };
+            return card;
+        }
         lastCommandValue.Text = string.IsNullOrWhiteSpace(lastTarget) ? "Nenhum comando" : lastTarget;
-        lastCommandValue.SetBounds(80, 40, 220, 26);
-        lastCommandValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
-        lastCommandValue.ForeColor = TextColor;
-        lastCommandValue.AutoEllipsis = true;
-        lastCommandMeta.Text = lastTargetAt.HasValue ? $"Identificada via voz • {lastTargetAt:HH:mm:ss}" : "Aguardando reconhecimento";
-        lastCommandMeta.SetBounds(80, 70, 224, 20);
-        lastCommandMeta.ForeColor = Muted;
-        lastCommandMeta.Font = new Font("Segoe UI", 8.8f);
-        lastCard.Controls.AddRange(new Control[] { lastCommandValue, lastCommandMeta });
-
-        var queueCard = CreateMetricCard("Fila de impressão", "▣", SoftBlue, 339, 209, 322, 92);
+        lastCommandMeta.Text = lastTargetAt.HasValue ? $"Identificado às {lastTargetAt:HH:mm:ss}" : "Aguardando reconhecimento";
         queueValue.Text = currentAgentStatus.Contains("pendente", StringComparison.OrdinalIgnoreCase) ? ExtractPendingText(currentAgentStatus) : "0 pendentes";
-        queueValue.SetBounds(80, 40, 220, 26);
-        queueValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
-        queueValue.ForeColor = TextColor;
         queueMeta.Text = printService.IsRunning ? "Print Agent conectado" : "Agente parado";
-        queueMeta.SetBounds(80, 70, 224, 20);
-        queueMeta.ForeColor = Muted;
-        queueMeta.Font = new Font("Segoe UI", 8.8f);
-        queueCard.Controls.AddRange(new Control[] { queueValue, queueMeta });
-
-        var nextCard = CreateMetricCard("Próxima ação", "◷", SoftAmber, 678, 209, 322, 92);
         nextActionValue.Text = "Aguardando comando";
-        nextActionValue.SetBounds(80, 40, 220, 26);
-        nextActionValue.Font = new Font("Segoe UI Semibold", 12.5f, FontStyle.Bold);
-        nextActionValue.ForeColor = TextColor;
-        nextActionMeta.Text = "Diga “Grok” e o nome da planilha";
-        nextActionMeta.SetBounds(80, 70, 224, 20);
-        nextActionMeta.ForeColor = Muted;
-        nextActionMeta.Font = new Font("Segoe UI", 8.8f);
-        nextCard.Controls.AddRange(new Control[] { nextActionValue, nextActionMeta });
+        nextActionMeta.Text = "Diga “Grok” para começar";
+        var m1 = Metric("Último comando", SoftGreen, lastCommandValue, lastCommandMeta);
+        var m2 = Metric("Fila de impressão", SoftBlue, queueValue, queueMeta);
+        var m3 = Metric("Próxima ação", SoftAmber, nextActionValue, nextActionMeta);
 
-        var cmdCard = new RoundedPanel
-        {
-            Left = 0,
-            Top = 315,
-            Width = 1000,
-            Height = 110,
-            BackColor = Card,
-            Radius = 18,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-
-        cmdCard.Controls.Add(new Label
-        {
-            Text = "Comando de voz ou manual",
-            Left = 24,
-            Top = 14,
-            AutoSize = true,
-            ForeColor = TextColor,
-            Font = new Font("Segoe UI Semibold", 10.8f, FontStyle.Bold)
-        });
-
-        cmdCard.Controls.Add(new Label
-        {
-            Text = "Dicas: fale “Grok” e depois “Serragem Gelenski”, “Toras Aza”, “Santa Clara”...",
-            Left = 24,
-            Top = 39,
-            Width = 820,
-            Height = 20,
-            ForeColor = Muted,
-            Font = new Font("Segoe UI", 8.7f)
-        });
-
-        var mic = new Button
-        {
-            Text = "🎤",
-            Left = 24,
-            Top = 65,
-            Width = 42,
-            Height = 32,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = SoftGreen,
-            ForeColor = GreenDark,
-            Font = new Font("Segoe UI Emoji", 11),
-            Cursor = Cursors.Hand
-        };
-        mic.FlatAppearance.BorderColor = Border;
-        mic.Click += (_, _) =>
-        {
-            if (!voice.IsRunning) _ = StartVoiceAsync();
-            command.Focus();
-        };
-
-        command.SetBounds(74, 67, 650, 28);
-        command.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        command.Font = new Font("Segoe UI", 10.5f);
-        command.PlaceholderText = "Ex.: Serragem Gelenski ou Toras Aza";
+        var cmdCard = new RoundedPanel { BackColor = Card, Radius = 16 };
+        var cmdTitle = new Label { Text = "Comando de voz ou manual", ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold) };
+        var tips = new Label { Text = "Experimente: “Serragem Gelenski”, “Toras Aza” ou “Santa Clara”", ForeColor = Muted, Font = new Font("Segoe UI", 8.5f), AutoEllipsis = true };
+        var microphone = new Button { Text = "🎙", FlatStyle = FlatStyle.Flat, BackColor = SoftGreen, ForeColor = GreenDark, Cursor = Cursors.Hand };
+        microphone.FlatAppearance.BorderColor = Border;
+        microphone.Click += (_, _) => { if (!voice.IsRunning) _ = StartVoiceAsync(); command.Focus(); };
+        command.Font = new Font("Segoe UI", 10f);
+        command.PlaceholderText = "Digite o nome da planilha...";
         command.KeyDown -= CommandKeyDown;
         command.KeyDown += CommandKeyDown;
+        var execute = new Button { Text = "▶  Executar comando", Cursor = Cursors.Hand };
+        StylePrimaryButton(execute);
+        execute.Font = new Font("Segoe UI Semibold", 9f);
+        execute.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
+        cmdCard.Controls.AddRange(new Control[] { cmdTitle, tips, microphone, command, execute });
 
-        var run = new Button
-        {
-            Text = "▶  Executar comando",
-            Left = 742,
-            Top = 65,
-            Width = 185,
-            Height = 32,
-            Anchor = AnchorStyles.Top | AnchorStyles.Right
-        };
-        StylePrimaryButton(run);
-        run.Click += async (_, _) => await ExecuteCommandTextAsync(command.Text.Trim(), false);
-
-        cmdCard.Controls.AddRange(new Control[] { mic, command, run });
-
-        var recentCard = new RoundedPanel
-        {
-            Left = 0, Top = 439, Width = 1000, Height = 126,
-            BackColor = Card, Radius = 18,
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-        recentCard.Controls.Add(new Label
-        {
-            Text = "▣  Últimas impressões",
-            Left = 24, Top = 12, Width = 300, Height = 23,
-            ForeColor = TextColor,
-            Font = new Font("Segoe UI Semibold", 10.8f, FontStyle.Bold)
-        });
-        recentPrintList.SetBounds(20, 44, 956, 53);
+        var recent = new RoundedPanel { BackColor = Card, Radius = 16 };
+        var recentTitle = new Label { Text = "Últimas impressões", ForeColor = TextColor, Font = new Font("Segoe UI Semibold", 10.5f, FontStyle.Bold) };
+        var recentSub = new Label { Text = "Histórico de documentos concluídos nesta sessão · Reimpressão rápida", ForeColor = Muted, Font = new Font("Segoe UI", 8.5f), AutoEllipsis = true };
         recentPrintList.FlowDirection = FlowDirection.LeftToRight;
         recentPrintList.WrapContents = false;
-        recentPrintList.AutoScroll = true;
+        recentPrintList.AutoScroll = false;
         recentPrintList.BackColor = Card;
-        recentPrintList.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        recentCard.Controls.Add(recentPrintList);
+        recent.Controls.AddRange(new Control[] { recentTitle, recentSub, recentPrintList });
         RefreshRecentPrints();
+        // Mantém o buffer de diagnóstico ativo, mas oculta o console do painel principal.
+        output.Visible = false;
+        output.SetBounds(0, 0, 1, 1);
+        root.Controls.AddRange(new Control[] { top, hero, m1, m2, m3, cmdCard, recent, output });
 
-        root.Controls.AddRange(new Control[]
+        void Arrange()
         {
-            statusStrip, hero, lastCard, queueCard, nextCard, cmdCard, recentCard
-        });
+            int w = root.ClientSize.Width, h = root.ClientSize.Height;
+            if (w < 100 || h < 100) return;
+            const int gap = 12;
+            int topH = 46, heroH = 136, metricsH = 94, cmdH = 113;
+            int recentH = Math.Max(94, h - topH - heroH - metricsH - cmdH - gap * 4);
+            top.SetBounds(0, 0, w, topH);
+            int chipW = 160, chipGap = 8, chipsWidth = chipW * 3 + chipGap * 2;
+            int x0 = Math.Max(0, w - chipsWidth);
+            c1.SetBounds(x0, 0, chipW, 45);
+            c2.SetBounds(x0 + chipW + chipGap, 0, chipW, 45);
+            c3.SetBounds(x0 + (chipW + chipGap) * 2, 0, chipW, 45);
 
-        void LayoutDashboard()
-        {
-            var w = Math.Max(840, root.ClientSize.Width - 4);
-            statusStrip.Width = w;
-            hero.Width = w;
-            cmdCard.Width = w;
-            recentCard.Width = w;
-            recentPrintList.Width = w - 48;
-            command.Width = Math.Max(200, w - 294);
-            run.Left = w - 209;
-            heroBadge.Left = w - 158;
-            voiceToggle.Left = w - 158;
+            int y = topH + gap;
+            hero.SetBounds(0, y, w, heroH);
+            visual.SetBounds(14, 41, 68, 67);
+            eyebrow.SetBounds(95, 12, Math.Max(120, w - 270), 18);
+            int textW = Math.Max(150, w - 300);
+            heroTitle.SetBounds(95, 34, textW, 38);
+            heroSubtitle.SetBounds(97, 74, textW, 24);
+            heroMeta.SetBounds(97, 101, textW, 22);
+            heroBadge.SetBounds(w - 148, 37, 130, 30);
+            voiceToggle.SetBounds(w - 148, 77, 130, 31);
+            y += heroH + gap;
 
-            var gap = 16;
-            var cardW = (w - gap * 2) / 3;
-            lastCommandValue.Width = lastCommandMeta.Width = Math.Max(110, cardW - 84);
-            queueValue.Width = queueMeta.Width = Math.Max(110, cardW - 84);
-            nextActionValue.Width = nextActionMeta.Width = Math.Max(110, cardW - 84);
-            heroTitle.Width = heroSubtitle.Width = heroMeta.Width = Math.Max(200, w - 312);
-            lastCard.Width = cardW;
-            queueCard.Left = cardW + gap;
-            queueCard.Width = cardW;
-            nextCard.Left = (cardW + gap) * 2;
-            nextCard.Width = w - nextCard.Left;
+            int cardW = (w - 2 * gap) / 3;
+            m1.SetBounds(0, y, cardW, metricsH);
+            m2.SetBounds(cardW + gap, y, cardW, metricsH);
+            m3.SetBounds(2 * (cardW + gap), y, w - 2 * (cardW + gap), metricsH);
+            y += metricsH + gap;
 
-            chip1.Left = Math.Max(0, w - 534);
-            chip2.Left = Math.Max(178, w - 356);
-            chip3.Left = Math.Max(356, w - 178);
+            cmdCard.SetBounds(0, y, w, cmdH);
+            cmdTitle.SetBounds(18, 12, w - 36, 22);
+            tips.SetBounds(18, 38, w - 36, 18);
+            microphone.SetBounds(18, 68, 38, 32);
+            int actionW = 176;
+            execute.SetBounds(w - actionW - 18, 68, actionW, 32);
+            command.SetBounds(64, 70, Math.Max(140, w - actionW - 94), 27);
+            y += cmdH + gap;
+
+            recent.SetBounds(0, y, w, Math.Min(recentH, Math.Max(0, h - y)));
+            recentTitle.SetBounds(18, 12, w - 36, 22);
+            recentSub.SetBounds(18, 38, w - 36, 19);
+            recentPrintList.SetBounds(16, 65, w - 32, Math.Max(24, recent.Height - 75));
         }
-
-        root.Resize += (_, _) => LayoutDashboard();
-        LayoutDashboard();
+        root.Resize += (_, _) => Arrange();
+        Arrange();
         return root;
     }
 
