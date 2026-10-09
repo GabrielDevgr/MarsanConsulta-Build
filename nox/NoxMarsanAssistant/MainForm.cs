@@ -195,13 +195,13 @@ public sealed class MainForm : Form
             Padding = new Padding(22, 20, 22, 18)
         };
 
-        var brand = new Panel { Dock = DockStyle.Top, Height = 150, BackColor = Sidebar };
+        var brand = new Panel { Dock = DockStyle.Top, Height = 170, BackColor = Sidebar };
         var logo = new RoundedPanel
         {
-            Left = 22,
+            Left = 18,
             Top = 10,
-            Width = 66,
-            Height = 66,
+            Width = 64,
+            Height = 64,
             BackColor = Color.White,
             Radius = 20
         };
@@ -217,8 +217,16 @@ public sealed class MainForm : Form
         brand.Controls.AddRange(new Control[]
         {
             logo,
-            new Label { Text = "MARSAN GROK", Left = 22, Top = 84, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 21, FontStyle.Bold) },
-            new Label { Text = "A S S I S T A N T", Left = 24, Top = 119, AutoSize = true, ForeColor = Color.FromArgb(156, 193, 174), Font = new Font("Segoe UI", 8.7f, FontStyle.Bold) }
+            new Label {
+                Text = "MARSAN", Left = 18, Top = 83, Width = 216, Height = 32,
+                AutoEllipsis = false, ForeColor = Color.White,
+                Font = new Font("Segoe UI Semibold", 20, FontStyle.Bold)
+            },
+            new Label {
+                Text = "GROK ASSISTANT", Left = 20, Top = 121, Width = 220, Height = 23,
+                AutoEllipsis = false, ForeColor = Color.FromArgb(156, 193, 174),
+                Font = new Font("Segoe UI Semibold", 10.3f, FontStyle.Bold)
+            }
         });
 
         var nav = new FlowLayoutPanel
@@ -228,19 +236,19 @@ public sealed class MainForm : Form
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             BackColor = Sidebar,
-            Padding = new Padding(0, 18, 0, 0)
+            Padding = new Padding(0, 8, 0, 0)
         };
 
         nav.Controls.Add(CreateNavButton("assistant", "▥   Assistente"));
         nav.Controls.Add(CreateNavButton("print", "▣   Impressão"));
         nav.Controls.Add(CreateNavButton("settings", "⚙   Configurações"));
 
-        var footer = new Panel { Dock = DockStyle.Bottom, Height = 86, BackColor = Sidebar };
+        var footer = new Panel { Dock = DockStyle.Bottom, Height = 92, BackColor = Sidebar };
         footer.Controls.AddRange(new Control[]
         {
-            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 16, AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
-            new Label { Text = "v0.12.5", Left = 2, Top = 50, AutoSize = true, ForeColor = Color.FromArgb(104, 137, 121), Font = new Font("Segoe UI", 8.3f) },
-            new Label { Text = "●  Assistente ativo", Left = 104, Top = 49, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
+            new Label { Text = "MARSAN MADEIRAS", Left = 2, Top = 12, Width = 210, Height = 20, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 9.2f, FontStyle.Bold) },
+            new Label { Text = "v0.12.5", Left = 2, Top = 44, Width = 72, Height = 20, ForeColor = Color.FromArgb(156, 193, 174), Font = new Font("Segoe UI", 8.3f) },
+            new Label { Text = "●  Assistente ativo", Left = 88, Top = 44, Width = 130, Height = 20, ForeColor = Accent, Font = new Font("Segoe UI", 8.3f) }
         });
 
         sidebar.Controls.Add(footer);
@@ -299,8 +307,8 @@ public sealed class MainForm : Form
         {
             Text = text,
             Width = 216,
-            Height = 58,
-            Margin = new Padding(0, 0, 0, 10),
+            Height = 54,
+            Margin = new Padding(0, 0, 0, 12),
             FlatStyle = FlatStyle.Flat,
             BackColor = Sidebar,
             ForeColor = Color.FromArgb(211, 226, 218),
