@@ -53,6 +53,17 @@ public sealed class NoxCommandService
         if (normalized.Contains("status"))
             return new(true, $"MARSAN ativo. Impressora: {(string.IsNullOrWhiteSpace(cfg.PrinterName) ? "não configurada" : cfg.PrinterName)}.");
 
+        // Comandos de cheque têm prioridade sobre a busca de nomes de planilhas.
+        if (Regex.IsMatch(normalized, @"\\b(cheque|cheques|xeque|xeques)\\b"))
+        {
+            var status = ResolveCheckStatus(normalized);
+            if (status is null)
+                return new(false, "Especifique o status: emitidos, em carteira, repassados ou todos os cheques.");
+
+            using var checksData = await api.GetConsultaDataAsync(cfg, ct);
+            return await PrintChecksAsync(checksData.RootElement, status, ExtractCopies(command), cfg, ct);
+        }
+
         using var data = await api.GetConsultaDataAsync(cfg, ct);
         if (!data.RootElement.TryGetProperty("movements", out var movements) || movements.ValueKind != JsonValueKind.Array)
             return new(false, "A API não retornou as movimentações esperadas.");
@@ -182,6 +193,110 @@ public sealed class NoxCommandService
             : $"Certo. Enviei a planilha de {customer} para impressão.";
 
         return new(true, message, false, diagnostics, customer);
+    }
+
+    private static string? ResolveCheckStatus(string normalized)
+    {
+        if (Regex.IsMatch(normalized, @"\b(todos|todas|geral|completo|completa)\b")) return "*";
+        if (Regex.IsMatch(normalized, @"\b(emitidos|emitido|emitidas|emitida)\b")) return "Emitido";
+        if (Regex.IsMatch(normalized, @"\b(carteira|guardados|guardado)\b")) return "Em Carteira";
+        if (Regex.IsMatch(normalized, @"\b(repassados|repassado|repassadas|repassada)\b")) return "Repassado";
+        if (Regex.IsMatch(normalized, @"\b(recebidos|recebido)\b")) return "Em Carteira";
+        if (Regex.IsMatch(normalized, @"\b(devolvidos|devolvido)\b")) return "Devolvido";
+        if (Regex.IsMatch(normalized, @"\b(depositados|depositado)\b")) return "Depositado";
+        if (Regex.IsMatch(normalized, @"\b(compensados|compensado)\b")) return "Compensado";
+        if (Regex.IsMatch(normalized, @"\b(cancelados|cancelado)\b")) return "Cancelado";
+        return null;
+    }
+
+    private async Task<NoxCommandResult> PrintChecksAsync(JsonElement root, string status, int copies, NoxConfig cfg, CancellationToken ct)
+    {
+        if (!root.TryGetProperty("checks", out var checks) || checks.ValueKind != JsonValueKind.Array)
+            return new(false, "A API Marsan Consulta não retornou o Controle de Cheques.");
+
+        var selected = checks.EnumerateArray()
+            .Where(x => status == "*" ||
+                VoiceTextNormalizer.Normalize(GetString(x, "status")) ==
+                VoiceTextNormalizer.Normalize(status))
+            .ToList();
+
+        if (selected.Count == 0)
+            return new(false, status == "*" ? "Não há cheques cadastrados." :
+                $"Não encontrei cheques com status {status}. Nenhuma impressão foi enviada.");
+
+        var title = status == "*" ? "Todos os Cheques" : $"Cheques {status}";
+        var html = BuildChecksHtml(selected, status);
+        await api.CreateRemotePrintAsync(cfg, "Controle de Cheques", title, html, copies, ct);
+        return new(true, $"Enviei {selected.Count} cheque(s) de {title} para impressão.",
+            false, new[] { $"[CHEQUES] filtro={status}; registros={selected.Count}; cópias={copies}" }, title);
+    }
+
+    private static string BuildChecksHtml(List<JsonElement> rows, string filter)
+    {
+        var culture = CultureInfo.GetCultureInfo("pt-BR");
+        var total = rows.Sum(x => GetDecimal(x, "valor"));
+        var heading = filter == "*" ? "TODOS OS CHEQUES" : filter.ToUpper(culture);
+        var background = filter switch
+        {
+            "Emitido" => "#75a9d5",
+            "Em Carteira" => "#b5ddca",
+            "Repassado" => "#f3c7c3",
+            _ => "#f1f5f9"
+        };
+        var sb = new StringBuilder();
+        sb.Append(""" 
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><style>
+@page{size:A4 landscape;margin:9mm}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#102439;margin:0}
+h1{background:#214e73;color:white;margin:0;padding:8px;text-align:center;font-size:18px}
+.info{display:flex;justify-content:space-between;margin:9px 1px;font-size:11px;font-weight:600}
+table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:9px}
+th{background:#07569a;color:white;padding:6px 3px;border:1px solid #ced7df}
+td{padding:5px 3px;border:1px solid #ced7df;overflow-wrap:anywhere}
+td.right{text-align:right}td.center{text-align:center}
+tr{break-inside:avoid;page-break-inside:avoid}
+tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
+</style></head><body><h1>CONTROLE DE CHEQUES</h1>
+""");
+        sb.Append("<div class='info'><span>STATUS: ").Append(Html(heading))
+          .Append("</span><span>REGISTROS: ").Append(rows.Count)
+          .Append(" &nbsp; | &nbsp; TOTAL: ").Append(total.ToString("C2", culture))
+          .Append("</span></div><table><thead><tr>");
+        foreach (var col in new[] { "BANCO", "Nº CHEQUE", "EMISSOR DO CHEQUE", "VENCIMENTO",
+            "VALOR (R$)", "STATUS", "REPASSADO PARA", "DATA REPASSE", "OBSERVAÇÕES" })
+            sb.Append("<th>").Append(col).Append("</th>");
+        sb.Append("</tr></thead><tbody>");
+        foreach (var x in rows)
+        {
+            var rowStatus = GetString(x, "status");
+            var rowColor = filter == "*" ? rowStatus switch
+            {
+                "Emitido" => "#75a9d5",
+                "Em Carteira" => "#b5ddca",
+                "Repassado" => "#f3c7c3",
+                _ => "#f1f5f9"
+            } : background;
+            sb.Append("<tr style='background:").Append(rowColor).Append("'>");
+            foreach (var name in new[] { "banco", "numero", "emissor" })
+                sb.Append("<td>").Append(Html(GetString(x, name))).Append("</td>");
+            sb.Append("<td class='center'>").Append(Html(FormatCheckDate(GetString(x, "vencimento")))).Append("</td>");
+            sb.Append("<td class='right'>").Append(GetDecimal(x, "valor").ToString("C2", culture)).Append("</td>");
+            sb.Append("<td>").Append(Html(rowStatus)).Append("</td>");
+            sb.Append("<td>").Append(Html(GetString(x, "repassadoPara"))).Append("</td>");
+            sb.Append("<td class='center'>").Append(Html(FormatCheckDate(GetString(x, "dataRepasse")))).Append("</td>");
+            sb.Append("<td>").Append(Html(GetString(x, "observacoes"))).Append("</td></tr>");
+        }
+        sb.Append("</tbody></table></body></html>");
+        return sb.ToString();
+    }
+
+    private static string FormatCheckDate(string value)
+    {
+        if (DateTime.TryParseExact(value, "yyyy-MM-dd",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return date.ToString("dd/MM/yy", CultureInfo.GetCultureInfo("pt-BR"));
+        return value;
     }
 
     private static int ExtractCopies(string command)
