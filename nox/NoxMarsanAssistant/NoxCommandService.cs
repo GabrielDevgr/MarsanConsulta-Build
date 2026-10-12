@@ -355,6 +355,46 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
                          .Sum(x => GetDecimal(x, "volume"));
         var refile = rows.Where(x => GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase))
                         .Sum(x => GetDecimal(x, "volume"));
+        // Validação obrigatória contra os valores efetivos das fórmulas do Google Sheets.
+        if (!root.TryGetProperty("sheetSummaries", out var summaries) || summaries.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("Impressão financeira bloqueada: API sem validação dos totais da planilha original.");
+        var matching = summaries.EnumerateArray().Where(x =>
+            string.Equals(GetString(x, "conta"), account, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (matching.Count != 1)
+            throw new InvalidOperationException("Impressão bloqueada: não foi possível validar a conta na planilha de origem.");
+        var official = matching[0];
+        decimal Authoritative(string field)
+        {
+            if (!official.TryGetProperty(field, out var p) || p.ValueKind != JsonValueKind.Number)
+                throw new InvalidOperationException($"Impressão bloqueada: fórmula {field} sem valor calculado válido.");
+            return p.GetDecimal();
+        }
+        var officialTotal = Authoritative("total");
+        var officialPaid = Authoritative("pago");
+        var officialBalance = Authoritative("saldo");
+        var officialVolume = Authoritative("madeira");
+        static bool Matches(decimal calculated, decimal reference, decimal tolerance) =>
+            Math.Abs(calculated - reference) <= tolerance;
+        if (!Matches(total, officialTotal, 0.02m) ||
+            !Matches(paid, officialPaid, 0.02m) ||
+            !Matches(saldo, officialBalance, 0.02m) ||
+            !Matches(madeira, officialVolume, 0.02m))
+            throw new InvalidOperationException(
+                $"Impressão financeira bloqueada por divergência com o Google Sheets. " +
+                $"Saldo calculado: {Money(saldo)}; saldo original: {Money(officialBalance)}. " +
+                "Verifique as fórmulas e os lançamentos antes de imprimir.");
+        // Após o confronto, a impressão utiliza os resultados oficiais das fórmulas.
+        total = officialTotal;
+        paid = officialPaid;
+        saldo = officialBalance;
+        madeira = officialVolume;
+        if (official.TryGetProperty("refile", out var refileValue) && refileValue.ValueKind == JsonValueKind.Number)
+        {
+            var officialRefile = refileValue.GetDecimal();
+            if (!Matches(refile, officialRefile, 0.02m))
+                throw new InvalidOperationException("Impressão bloqueada: volume de refile diverge da planilha original.");
+            refile = officialRefile;
+        }
         var client = CleanAccountName(account);
         // Nunca omitir movimentações silenciosamente de um relatório financeiro.
         var printRows = rows;
