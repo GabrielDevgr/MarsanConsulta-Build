@@ -341,8 +341,20 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
 
         var total = rows.Sum(x => GetDecimal(x, "valorCarga"));
         var paid = rows.Sum(x => GetDecimal(x, "valorPago"));
-        var madeira = rows.Where(x => GetString(x, "tipo").Equals("MADEIRA", StringComparison.OrdinalIgnoreCase)).Sum(x => GetDecimal(x, "volume"));
-        var refile = rows.Where(x => GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase)).Sum(x => GetDecimal(x, "volume"));
+        // A fonte classifica as contas como compra ou venda. Não inferir o sinal pelo nome.
+        var categories = rows.Select(x => GetString(x, "categoria").Trim().ToLowerInvariant())
+            .Where(x => x.Length > 0).Distinct().ToList();
+        if (categories.Count != 1 || (categories[0] != "compra" && categories[0] != "venda"))
+            throw new InvalidOperationException("Impressão financeira bloqueada: tipo de conta não identificado com segurança.");
+
+        var purchase = categories[0] == "compra";
+        var saldo = purchase ? paid - total : total - paid;
+        // Tipos TORAS/MADEIRA possuem volume, ACERTO não. Respeitar o campo de volume da API.
+        var madeira = rows.Where(x => !GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase)
+                                     && !GetString(x, "tipo").Equals("ACERTO", StringComparison.OrdinalIgnoreCase))
+                         .Sum(x => GetDecimal(x, "volume"));
+        var refile = rows.Where(x => GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase))
+                        .Sum(x => GetDecimal(x, "volume"));
         var client = CleanAccountName(account);
         var printRows = rows.Skip(Math.Max(0, rows.Count - 28)).ToList();
 
@@ -352,7 +364,7 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
 .header{background:#123e75;color:#fff;text-align:center;font-size:12.2px;font-weight:800;padding:2.4mm 1.5mm;margin-bottom:1.2mm}
 .summary{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1.15fr;margin-bottom:2.1mm}
 .metric{min-height:13mm;padding:1.6mm .8mm 1.1mm;text-align:center;border-right:.25mm solid #c8c8c8;background:#d6d6d6}
-.metric:last-child{border-right:0;background:#b7e3cf;color:#0b4e2c}.label{display:block;font-size:7.5px;margin-bottom:1.5mm}.value{display:block;font-size:9.8px;font-weight:800}
+.metric:last-child{border-right:0}.balance-negative{background:#f3c9c5;color:#831b1b}.balance-positive{background:#b7e3cf;color:#0b4e2c}.balance-zero{background:#e5e7eb;color:#374151}.label{display:block;font-size:7.5px;margin-bottom:1.5mm}.value{display:block;font-size:9.8px;font-weight:800}
 table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:9pt;line-height:1.02}th{background:#123e75;color:#fff;border:.16mm solid #bfc4c8;padding:.9mm .45mm;font-size:8.4pt}
 td{border:.14mm solid #c7c7c7;padding:.5mm .45mm;height:4.3mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .num{text-align:right}.madeira{background:#4d3d25;color:#fff}.refile{background:#e6d5b0}.acerto td{background:#dfeeda;color:#184f20}
@@ -364,7 +376,10 @@ th:nth-child(1){width:9.5%}th:nth-child(2){width:7.5%}th:nth-child(3){width:8.5%
         Metric(sb, "TOTAL PAGO (R$)", Money(paid));
         Metric(sb, "TOTAL MADEIRA M³", Number(madeira) + " m³");
         Metric(sb, "TOTAL REFILE M³", Number(refile) + " m³");
-        Metric(sb, "SALDO ATUAL", Money(total - paid));
+        var balanceClass = saldo < 0 ? "balance-negative" : saldo > 0 ? "balance-positive" : "balance-zero";
+        sb.Append("<div class='metric ").Append(balanceClass)
+          .Append("'><span class='label'>SALDO ATUAL</span><span class='value'>")
+          .Append(Html(Money(saldo))).Append("</span></div>");
         sb.Append("</div>");
         sb.Append($"<table><thead><tr><th>DATA</th><th>TIPO</th><th>Nº ROMANEIO</th><th>CARGA (m³)</th><th>VALOR (m³)</th><th>VALOR CARGA</th><th>VALOR PAGO {Html(client)}</th><th>Nº CHEQUE / REF</th><th>OBSERVAÇÃO</th></tr></thead><tbody>");
 
