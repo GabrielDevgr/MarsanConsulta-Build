@@ -356,7 +356,8 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
         var refile = rows.Where(x => GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase))
                         .Sum(x => GetDecimal(x, "volume"));
         var client = CleanAccountName(account);
-        var printRows = rows.Skip(Math.Max(0, rows.Count - 28)).ToList();
+        // Nunca omitir movimentações silenciosamente de um relatório financeiro.
+        var printRows = rows;
 
         var sb = new StringBuilder();
         sb.Append(@"<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><style>
@@ -365,7 +366,7 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
 .summary{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1.15fr;margin-bottom:2.1mm}
 .metric{min-height:13mm;padding:1.6mm .8mm 1.1mm;text-align:center;border-right:.25mm solid #c8c8c8;background:#d6d6d6}
 .metric:last-child{border-right:0}.balance-negative{background:#f3c9c5;color:#831b1b}.balance-positive{background:#b7e3cf;color:#0b4e2c}.balance-zero{background:#e5e7eb;color:#374151}.label{display:block;font-size:7.5px;margin-bottom:1.5mm}.value{display:block;font-size:9.8px;font-weight:800}
-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:9pt;line-height:1.02}th{background:#123e75;color:#fff;border:.16mm solid #bfc4c8;padding:.9mm .45mm;font-size:8.4pt}
+table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:9pt;line-height:1.02}thead{display:table-header-group}tr{page-break-inside:avoid;break-inside:avoid}th{background:#123e75;color:#fff;border:.16mm solid #bfc4c8;padding:.9mm .45mm;font-size:8.4pt}
 td{border:.14mm solid #c7c7c7;padding:.5mm .45mm;height:4.3mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .num{text-align:right}.madeira{background:#4d3d25;color:#fff}.refile{background:#e6d5b0}.acerto td{background:#dfeeda;color:#184f20}
 th:nth-child(1){width:9.5%}th:nth-child(2){width:7.5%}th:nth-child(3){width:8.5%}th:nth-child(4){width:9.5%}th:nth-child(5){width:9.5%}th:nth-child(6){width:11.5%}th:nth-child(7){width:13.5%}th:nth-child(8){width:12.5%}th:nth-child(9){width:18%}
