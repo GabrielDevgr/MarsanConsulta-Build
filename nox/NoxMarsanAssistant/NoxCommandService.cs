@@ -372,29 +372,69 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
         var officialTotal = Authoritative("total");
         var officialPaid = Authoritative("pago");
         var officialBalance = Authoritative("saldo");
-        var officialVolume = Authoritative("madeira");
         static bool Matches(decimal calculated, decimal reference, decimal tolerance) =>
             Math.Abs(calculated - reference) <= tolerance;
+
         if (!Matches(total, officialTotal, 0.02m) ||
             !Matches(paid, officialPaid, 0.02m) ||
-            !Matches(saldo, officialBalance, 0.02m) ||
-            !Matches(madeira, officialVolume, 0.02m))
+            !Matches(saldo, officialBalance, 0.02m))
             throw new InvalidOperationException(
-                $"Impressão financeira bloqueada por divergência com o Google Sheets. " +
-                $"Saldo calculado: {Money(saldo)}; saldo original: {Money(officialBalance)}. " +
-                "Verifique as fórmulas e os lançamentos antes de imprimir.");
-        // Após o confronto, a impressão utiliza os resultados oficiais das fórmulas.
+                $"Impressão bloqueada: valores financeiros divergem do Google Sheets. " +
+                $"Cargas {Money(total)} / {Money(officialTotal)}, " +
+                $"Pago {Money(paid)} / {Money(officialPaid)}, " +
+                $"Saldo {Money(saldo)} / {Money(officialBalance)}.");
+
+        if (!official.TryGetProperty("volumes", out var sourceVolumes) || sourceVolumes.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("Impressão bloqueada: API sem valores oficiais de volumes.");
+
+        // Comparar os tipos efetivos registrados, inclusive LIXO e SERRAGEM.
+        // Tipos não cobertos pela fórmula original devem impedir uma impressão enganosa.
+        var rowTypes = rows
+            .Where(x => GetDecimal(x, "volume") != 0)
+            .GroupBy(x => VoiceTextNormalizer.Normalize(GetString(x, "tipo")))
+            .ToDictionary(g => g.Key, g => g.Sum(x => GetDecimal(x, "volume")));
+        var reportedTypes = new HashSet<string>();
+        decimal mainVolume = 0;
+        decimal secondaryVolume = 0;
+        string volumeLabel = "TOTAL VOLUME M³";
+        string secondaryLabel = "TOTAL REFILE M³";
+        foreach (var item in sourceVolumes.EnumerateArray())
+        {
+            var type = GetString(item, "tipo");
+            var key = VoiceTextNormalizer.Normalize(type);
+            if (type.Length == 0 || !item.TryGetProperty("valor", out var value) || value.ValueKind != JsonValueKind.Number)
+                throw new InvalidOperationException("Impressão bloqueada: volume oficial inválido.");
+            var reference = value.GetDecimal();
+            reportedTypes.Add(key);
+            var actual = rowTypes.Where(x => x.Key == key || (key == "toras" && x.Key == "toras"))
+                                 .Sum(x => x.Value);
+            if (!Matches(actual, reference, 0.02m))
+                throw new InvalidOperationException(
+                    $"Impressão bloqueada: volume de {type} diferente da fórmula original. " +
+                    $"Movimentações: {Number(actual)} m³; planilha: {Number(reference)} m³.");
+            if (key == "refile")
+            {
+                secondaryVolume = reference;
+                secondaryLabel = "TOTAL REFILE M³";
+            }
+            else
+            {
+                mainVolume += reference;
+                volumeLabel = "TOTAL " + type.ToUpperInvariant() + " M³";
+            }
+        }
+        foreach (var kv in rowTypes)
+        {
+            if (!reportedTypes.Contains(kv.Key))
+                throw new InvalidOperationException(
+                    $"Impressão bloqueada: tipo '{kv.Key}' com volume {Number(kv.Value)} m³ " +
+                    "não está incluído nas fórmulas do resumo da planilha.");
+        }
         total = officialTotal;
         paid = officialPaid;
         saldo = officialBalance;
-        madeira = officialVolume;
-        if (official.TryGetProperty("refile", out var refileValue) && refileValue.ValueKind == JsonValueKind.Number)
-        {
-            var officialRefile = refileValue.GetDecimal();
-            if (!Matches(refile, officialRefile, 0.02m))
-                throw new InvalidOperationException("Impressão bloqueada: volume de refile diverge da planilha original.");
-            refile = officialRefile;
-        }
+        madeira = mainVolume;
+        refile = secondaryVolume;
         var client = CleanAccountName(account);
         // Nunca omitir movimentações silenciosamente de um relatório financeiro.
         var printRows = rows;
@@ -415,8 +455,8 @@ th:nth-child(1){width:9.5%}th:nth-child(2){width:7.5%}th:nth-child(3){width:8.5%
         sb.Append("<div class='summary'>");
         Metric(sb, "TOTAL CARGAS (R$)", Money(total));
         Metric(sb, "TOTAL PAGO (R$)", Money(paid));
-        Metric(sb, "TOTAL MADEIRA M³", Number(madeira) + " m³");
-        Metric(sb, "TOTAL REFILE M³", Number(refile) + " m³");
+        Metric(sb, volumeLabel, Number(madeira) + " m³");
+        Metric(sb, secondaryLabel, Number(refile) + " m³");
         var balanceClass = saldo < 0 ? "balance-negative" : saldo > 0 ? "balance-positive" : "balance-zero";
         sb.Append("<div class='metric ").Append(balanceClass)
           .Append("'><span class='label'>SALDO ATUAL</span><span class='value'>")
