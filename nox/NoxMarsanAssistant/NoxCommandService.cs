@@ -366,6 +366,19 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
         var officialTotal = Authoritative("total");
         var officialPaid = Authoritative("pago");
         var officialBalance = Authoritative("saldo");
+        // Read the actual, formatted Google Sheets value and colors. Never recalculate its sign.
+        if (!official.TryGetProperty("saldoDisplay", out var balanceDisplay) ||
+            balanceDisplay.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("Impressão bloqueada: API não forneceu a formatação original do saldo.");
+        var balanceText = GetString(balanceDisplay, "text");
+        if (string.IsNullOrWhiteSpace(balanceText))
+            throw new InvalidOperationException("Impressão bloqueada: texto original do saldo não encontrado.");
+        var balanceBackground = GetString(balanceDisplay, "background");
+        var balanceForeground = GetString(balanceDisplay, "foreground");
+        static bool ValidHex(string color) => Regex.IsMatch(color, @"^#[0-9a-fA-F]{6}$");
+        if (!ValidHex(balanceBackground) || !ValidHex(balanceForeground))
+            throw new InvalidOperationException("Impressão bloqueada: cores originais do saldo não disponíveis.");
+
         static bool Matches(decimal calculated, decimal reference, decimal tolerance) =>
             Math.Abs(calculated - reference) <= tolerance;
 
@@ -450,10 +463,10 @@ th:nth-child(1){width:9.5%}th:nth-child(2){width:7.5%}th:nth-child(3){width:8.5%
         Metric(sb, "TOTAL PAGO (R$)", Money(paid));
         Metric(sb, volumeLabel, Number(madeira) + " m³");
         Metric(sb, secondaryLabel, Number(refile) + " m³");
-        var balanceClass = saldo < 0 ? "balance-negative" : saldo > 0 ? "balance-positive" : "balance-zero";
-        sb.Append("<div class='metric ").Append(balanceClass)
+        sb.Append("<div class='metric' style='background:").Append(balanceBackground)
+          .Append(";color:").Append(balanceForeground)
           .Append("'><span class='label'>SALDO ATUAL</span><span class='value'>")
-          .Append(Html(Money(saldo))).Append("</span></div>");
+          .Append(Html(balanceText)).Append("</span></div>");
         sb.Append("</div>");
         sb.Append($"<table><thead><tr><th>DATA</th><th>TIPO</th><th>Nº ROMANEIO</th><th>CARGA (m³)</th><th>VALOR (m³)</th><th>VALOR CARGA</th><th>VALOR PAGO {Html(client)}</th><th>Nº CHEQUE / REF</th><th>OBSERVAÇÃO</th></tr></thead><tbody>");
 
