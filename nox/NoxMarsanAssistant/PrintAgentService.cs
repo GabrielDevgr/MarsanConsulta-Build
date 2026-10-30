@@ -93,11 +93,17 @@ public sealed class PrintAgentService : IDisposable
             if (string.IsNullOrWhiteSpace(cfg.PrinterName))
                 throw new InvalidOperationException("Nenhuma impressora selecionada.");
 
-            if (!doc.ContentType.Contains("html", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Impressão automática requer documento HTML.");
+            var isHtml = doc.ContentType.Contains("html", StringComparison.OrdinalIgnoreCase);
+            var isPdf = doc.ContentType.Contains("pdf", StringComparison.OrdinalIgnoreCase) ||
+                (doc.Bytes.Length >= 5 && Encoding.ASCII.GetString(doc.Bytes, 0, 5) == "%PDF-");
+            if (!isHtml && !isPdf)
+                throw new InvalidOperationException("Documento recebido não é HTML nem PDF.");
 
             StatusChanged?.Invoke($"Imprimindo • {job.CustomerName}");
-            await PrintHtmlAsync(doc.Bytes, cfg.PrinterName, Math.Max(1, job.Copies), ct);
+            if (isPdf)
+                await PrintPdfAsync(doc.Bytes, cfg.PrinterName, Math.Max(1, job.Copies), ct);
+            else
+                await PrintHtmlAsync(doc.Bytes, cfg.PrinterName, Math.Max(1, job.Copies), ct);
             await api.CompleteAsync(job.Id, "PRINTED", $"Impresso em {cfg.PrinterName}", cfg, ct);
             StatusChanged?.Invoke($"Impresso • {job.CustomerName}");
         }
@@ -130,6 +136,42 @@ public sealed class PrintAgentService : IDisposable
         if (size <= 0) return null;
         var sb = new StringBuilder(size);
         return GetDefaultPrinter(sb, ref size) ? sb.ToString() : null;
+    }
+
+    private static async Task PrintPdfAsync(byte[] pdfBytes, string printerName, int copies, CancellationToken ct)
+    {
+        if (!PrinterSettings.InstalledPrinters.Cast<string>().Any(x => string.Equals(x, printerName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("A impressora selecionada não está instalada no Windows.");
+        if (pdfBytes.Length < 5 || Encoding.ASCII.GetString(pdfBytes, 0, 5) != "%PDF-")
+            throw new InvalidOperationException("Documento não contém um PDF válido.");
+        // SumatraPDF supports explicit printer and silent PDF printing.
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "SumatraPDF.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SumatraPDF", "SumatraPDF.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "SumatraPDF", "SumatraPDF.exe")
+        };
+        var sumatra = candidates.FirstOrDefault(File.Exists);
+        if (sumatra is null)
+            throw new InvalidOperationException("Para impressão automática de PDF, instale SumatraPDF ou use Salvar PDF. Nenhum documento incorreto foi impresso.");
+        var tmp = Path.Combine(Path.GetTempPath(), $"marsan-original-{Guid.NewGuid():N}.pdf");
+        try
+        {
+            await File.WriteAllBytesAsync(tmp, pdfBytes, ct);
+            for (int i = 0; i < copies; i++)
+            {
+                var psi = new ProcessStartInfo { FileName = sumatra, UseShellExecute = false, CreateNoWindow = true };
+                psi.ArgumentList.Add("-silent");
+                psi.ArgumentList.Add("-print-to");
+                psi.ArgumentList.Add(printerName);
+                psi.ArgumentList.Add(tmp);
+                using var p = Process.Start(psi) ?? throw new InvalidOperationException("Falha ao iniciar impressor PDF.");
+                await p.WaitForExitAsync(ct);
+                if (p.ExitCode != 0)
+                    throw new InvalidOperationException($"Impressor PDF falhou (código {p.ExitCode}).");
+            }
+        }
+        finally { try { File.Delete(tmp); } catch { } }
     }
 
     private static async Task PrintHtmlAsync(byte[] htmlBytes, string printerName, int copies, CancellationToken ct)
