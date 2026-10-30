@@ -425,7 +425,7 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
         }
         total = officialTotal;
         paid = officialPaid;
-        saldo = officialBalance;
+        var saldo = officialBalance;
         madeira = mainVolume;
         refile = secondaryVolume;
         var client = CleanAccountName(account);
