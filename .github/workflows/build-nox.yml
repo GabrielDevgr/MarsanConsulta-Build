@@ -22,3 +22,14 @@ jobs:
         with:
           name: MARSAN-GROK-ASSISTANT-Windows-x64
           path: nox/NoxMarsanAssistant/bin/Release/net8.0-windows/win-x64/publish/MarsanGrokAssistant.exe
+
+      - name: Pack complete project source
+        shell: pwsh
+        run: |
+          $files = @("nox", "print-agent", "app", ".github", "README.md", "build.gradle", "gradle.properties", "settings.gradle", "TRIGGER.txt")
+          Compress-Archive -Path $files -DestinationPath MARSAN-GROK-ASSISTANT-FONTE-COMPLETO.zip -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MARSAN-GROK-ASSISTANT-FONTE-COMPLETO
+          path: MARSAN-GROK-ASSISTANT-FONTE-COMPLETO.zip
+          retention-days: 90
