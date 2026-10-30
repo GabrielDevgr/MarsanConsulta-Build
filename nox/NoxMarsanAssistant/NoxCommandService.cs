@@ -341,14 +341,8 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
 
         var total = rows.Sum(x => GetDecimal(x, "valorCarga"));
         var paid = rows.Sum(x => GetDecimal(x, "valorPago"));
-        // A fonte classifica as contas como compra ou venda. Não inferir o sinal pelo nome.
-        var categories = rows.Select(x => GetString(x, "categoria").Trim().ToLowerInvariant())
-            .Where(x => x.Length > 0).Distinct().ToList();
-        if (categories.Count != 1 || (categories[0] != "compra" && categories[0] != "venda"))
-            throw new InvalidOperationException("Impressão financeira bloqueada: tipo de conta não identificado com segurança.");
-
-        var purchase = categories[0] == "compra";
-        var saldo = purchase ? paid - total : total - paid;
+        // O saldo oficial da planilha prevalece sobre regras genericas de compra/venda.
+        // Nao inverter nem recomputar o sinal: formulas podem ser personalizadas por conta.
         // Tipos TORAS/MADEIRA possuem volume, ACERTO não. Respeitar o campo de volume da API.
         var madeira = rows.Where(x => !GetString(x, "tipo").Equals("REFILE", StringComparison.OrdinalIgnoreCase)
                                      && !GetString(x, "tipo").Equals("ACERTO", StringComparison.OrdinalIgnoreCase))
@@ -376,13 +370,12 @@ tfoot td{background:#e8f0f5;font-weight:bold;font-size:11px}
             Math.Abs(calculated - reference) <= tolerance;
 
         if (!Matches(total, officialTotal, 0.02m) ||
-            !Matches(paid, officialPaid, 0.02m) ||
-            !Matches(saldo, officialBalance, 0.02m))
+            !Matches(paid, officialPaid, 0.02m))
             throw new InvalidOperationException(
                 $"Impressão bloqueada: valores financeiros divergem do Google Sheets. " +
                 $"Cargas {Money(total)} / {Money(officialTotal)}, " +
                 $"Pago {Money(paid)} / {Money(officialPaid)}, " +
-                $"Saldo {Money(saldo)} / {Money(officialBalance)}.");
+                $"Saldo oficial {Money(officialBalance)}.");
 
         if (!official.TryGetProperty("volumes", out var sourceVolumes) || sourceVolumes.ValueKind != JsonValueKind.Array)
             throw new InvalidOperationException("Impressão bloqueada: API sem valores oficiais de volumes.");
