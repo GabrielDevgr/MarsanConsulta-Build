@@ -95,7 +95,23 @@ public sealed class MarsanApiClient
         return JsonDocument.Parse(body);
     }
 
-    public async Task CreateRemotePrintAsync(NoxConfig cfg, string customerName, string title, string html, int copies, CancellationToken ct)
+    public async Task<string> ExportOriginalSheetPdfBase64Async(NoxConfig cfg, string account, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(cfg.ConsultaApiKey))
+            throw new InvalidOperationException("Configure a chave da API Marsan Consulta.");
+        var url = cfg.ApiBaseUrl.TrimEnd('/') + "/api/consulta-planilhas/export?conta=" + Uri.EscapeDataString(account);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add("x-marsan-consulta-key", cfg.ConsultaApiKey);
+        using var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Exportação fiel bloqueada (HTTP {(int)response.StatusCode}).");
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        if (bytes.Length < 5 || Encoding.ASCII.GetString(bytes, 0, 5) != "%PDF-")
+            throw new InvalidOperationException("A API não retornou o PDF da planilha original.");
+        return Convert.ToBase64String(bytes);
+    }
+
+    public async Task CreateRemotePrintAsync(NoxConfig cfg, string customerName, string title, string documentContent, int copies, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(cfg.ConsultaApiKey))
             throw new InvalidOperationException("Configure a chave da API Marsan Consulta no NOX.");
@@ -108,8 +124,8 @@ public sealed class MarsanApiClient
             customerName,
             title,
             documentType = "controle_saldo",
-            documentFormat = "html",
-            documentContent = html,
+            documentFormat = "pdf_base64",
+            documentContent,
             copies = Math.Max(1, copies),
             requestedBy = "MARSAN Assistant"
         }), Encoding.UTF8, "application/json");
