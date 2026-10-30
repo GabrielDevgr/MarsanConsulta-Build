@@ -184,9 +184,11 @@ public sealed class NoxCommandService
         if (!rowsExist)
             return new(false, $"A planilha {displayName} não está disponível para impressão.", false, diagnostics);
 
-        var html = BuildPrintableHtml(root, accountId);
+        // Print the original tab directly: exact formulas, signs, fonts and cell colors.
+        // Do not reconstruct a financial statement from movement rows.
+        var pdfBase64 = await api.ExportOriginalSheetPdfBase64Async(cfg, accountId, ct);
         var customer = CleanAccountName(accountId);
-        await api.CreateRemotePrintAsync(cfg, customer, "Controle de Cargas e Saldo", html, copies, ct);
+        await api.CreateRemotePrintAsync(cfg, customer, "Controle de Cargas e Saldo", pdfBase64, copies, ct);
 
         var message = copies > 1
             ? $"Certo. Enviei {copies} cópias de {customer} para impressão."
