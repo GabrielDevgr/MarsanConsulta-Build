@@ -15,10 +15,34 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Bundle portable PDF printer (official SumatraPDF 3.6.1 x64)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $url = 'https://www.sumatrapdfreader.org/dl/rel/3.6.1/SumatraPDF-3.6.1-64.zip'
+          $archive = Join-Path $env:RUNNER_TEMP 'sumatra-portable.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'sumatra-portable'
+          Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRedirection 5
+          if ((Get-Item $archive).Length -lt 2000000) { throw 'Portable PDF package looks incomplete' }
+          Expand-Archive -Path $archive -DestinationPath $extract -Force
+          $engine = Get-ChildItem -Path $extract -Filter '*.exe' -Recurse | Where-Object { $_.Name -match 'SumatraPDF' } | Select-Object -First 1
+          if (-not $engine) { throw 'Official PDF printer executable not found in archive' }
+          $destination = 'nox/NoxMarsanAssistant/ThirdParty'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Copy-Item -Path $engine.FullName -Destination (Join-Path $destination 'SumatraPDF.exe') -Force
+          if ((Get-Item (Join-Path $destination 'SumatraPDF.exe')).Length -lt 1000000) { throw 'Bundled PDF printer is incomplete' }
+          Write-Host 'Bundled portable PDF printer:' (Get-Item (Join-Path $destination 'SumatraPDF.exe')).Length 'bytes'
       - name: Run voice interpretation tests
         run: dotnet run --project nox/NoxMarsanAssistant.Tests/NoxMarsanAssistant.Tests.csproj -c Release
       - name: Publish MARSAN Windows x64
         run: dotnet publish nox/NoxMarsanAssistant/NoxMarsanAssistant.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+      - name: Verify built-in PDF print engine in release
+        shell: pwsh
+        run: |
+          $exe = 'nox/NoxMarsanAssistant/bin/Release/net8.0-windows/win-x64/publish/MarsanGrokAssistant.exe'
+          if (-not (Test-Path $exe)) { throw 'Marsan exe missing' }
+          if ((Get-Item $exe).Length -lt 150000000) { throw 'Marsan exe suspiciously small; embedded PDF printer may be missing' }
+          Write-Host 'Windows release:' (Get-Item $exe).Length 'bytes'
       - uses: actions/upload-artifact@v4
         with:
           name: MARSAN-GROK-ASSISTANT-Windows-x64
