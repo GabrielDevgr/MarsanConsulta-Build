@@ -1,0 +1,37 @@
+name: Backup completo do repositorio
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/backup-recuperacao.yml
+permissions:
+  contents: read
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exportar codigo, branches e historico
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p BACKUP
+          REPO="${GITHUB_REPOSITORY##*/}"
+          git archive --format=zip --output="BACKUP/${REPO}-CODIGO-FONTE.zip" HEAD
+          git bundle create "BACKUP/${REPO}-HISTORICO-COMPLETO.bundle" --all
+          git branch -a -vv > BACKUP/BRANCHES.txt
+          git log -1 --format='Commit: %H%nData: %cI%nMensagem: %s' > BACKUP/COMMIT_ATUAL.txt
+          printf '%s\n' "Repositorio: ${GITHUB_REPOSITORY}" "Branch do snapshot: ${GITHUB_REF_NAME}" "Data UTC: $(date -u +%FT%TZ)" > BACKUP/INVENTARIO.txt
+          printf '%s\n' "CODIGO-FONTE.zip contem arquivos versionados do HEAD. HISTORICO-COMPLETO.bundle guarda commits e branches para recuperar com git clone <arquivo.bundle> <pasta>." >> BACKUP/INVENTARIO.txt
+          (cd BACKUP && sha256sum *.zip *.bundle > SHA256SUMS.txt)
+          ls -lh BACKUP
+      - name: Enviar backup para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: BACKUP-${{ github.event.repository.name }}-${{ github.ref_name }}
+          path: BACKUP/
+          retention-days: 90
+          if-no-files-found: error
