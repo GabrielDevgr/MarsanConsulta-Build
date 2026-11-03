@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Diagnostics;
 using System.Drawing.Printing;
 using System.Runtime.InteropServices;
@@ -138,6 +139,52 @@ public sealed class PrintAgentService : IDisposable
         return GetDefaultPrinter(sb, ref size) ? sb.ToString() : null;
     }
 
+    // The Windows build bundles the portable PDF printing engine inside
+    // MarsanGrokAssistant.exe. It is extracted automatically to the user's
+    // local application data on first print: no installer or PDF association.
+    private static readonly SemaphoreSlim PdfPrinterLock = new(1, 1);
+
+    private static async Task<string> EnsureBundledPdfPrinterAsync(CancellationToken ct)
+    {
+        const string resourceName = "MarsanPortablePdfPrinter";
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "MarsanGrokAssistant", "PdfPrinter-3.6.1");
+        var destination = Path.Combine(folder, "SumatraPDF.exe");
+
+        await PdfPrinterLock.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(destination) && new FileInfo(destination).Length > 1_000_000)
+                return destination;
+
+            await using var resource = Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException(
+                    "Esta versão do Marsan não contém o módulo interno de impressão PDF. Atualize o executável.");
+            Directory.CreateDirectory(folder);
+            var temporary = Path.Combine(folder, $"printer-{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await using (var target = new FileStream(
+                    temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    81920, FileOptions.Asynchronous))
+                {
+                    await resource.CopyToAsync(target, ct);
+                }
+                await using (var check = File.OpenRead(temporary))
+                {
+                    if (check.Length < 1_000_000 || check.ReadByte() != 'M' || check.ReadByte() != 'Z')
+                        throw new InvalidOperationException("Módulo de impressão PDF incorporado está inválido.");
+                }
+                File.Move(temporary, destination, overwrite: true);
+            }
+            finally { try { File.Delete(temporary); } catch { } }
+            return destination;
+        }
+        finally { PdfPrinterLock.Release(); }
+    }
+
     private static async Task PrintPdfAsync(byte[] pdfBytes, string printerName, int copies, CancellationToken ct)
     {
         if (!PrinterSettings.InstalledPrinters.Cast<string>().Any(x => string.Equals(x, printerName, StringComparison.OrdinalIgnoreCase)))
@@ -151,9 +198,8 @@ public sealed class PrintAgentService : IDisposable
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "SumatraPDF", "SumatraPDF.exe"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "SumatraPDF", "SumatraPDF.exe")
         };
-        var sumatra = candidates.FirstOrDefault(File.Exists);
-        if (sumatra is null)
-            throw new InvalidOperationException("Para impressão automática de PDF, instale SumatraPDF ou use Salvar PDF. Nenhum documento incorreto foi impresso.");
+        var sumatra = candidates.FirstOrDefault(File.Exists)
+            ?? await EnsureBundledPdfPrinterAsync(ct);
         var tmp = Path.Combine(Path.GetTempPath(), $"marsan-original-{Guid.NewGuid():N}.pdf");
         try
         {
